@@ -68,7 +68,7 @@ and open the link received with a web browser. Once completed the wizard, the lo
 
 - Create a bot hook on Zulip (retrieve the address of your Docker network interface with `ip addr show docker0`). Type of the bot is "webkook outgoing".
 
-![screenshot](./zulip-bot-setup.png)
+  ![screenshot](./zulip-bot-setup.png)
 
 - Get the "zuliprc" and save it somewhere, example:
   ```
