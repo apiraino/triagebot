@@ -2,10 +2,12 @@
 
 This is the triage and team assistance bot for the rust-lang organization.
 
-Please see the [wiki] for our documentation, and feel free to contribute edits
-if you find something helpful!
+For the Rust project the triagebot is deployed on `https://triagebot.infra.rust-lang.org/`.
+
+Please see the [wiki] or [Rust Forge] for the triagebot documentation and available commands, feel free to contribute edits if you find something helpful!
 
 [wiki]: https://github.com/rust-lang/triagebot/wiki
+[Rust Forge]: https://forge.rust-lang.org/platforms/zulip/triagebot.html
 
 ## Installation
 
@@ -22,6 +24,10 @@ If `GITHUB_API_TOKEN` is not set, the token can also be stored in `~/.gitconfig`
 To configure the GitHub webhook, point it to the `/github-hook` path of your
 webserver (by default `http://localhost:8000`), configure the secret you chose
 in `.env`, set the content type to `application/json` and select all events.
+
+## Contributors
+
+Thanks for contributing a patch! Please have a look at the [developer](./developer-setup.md) documentation for more details on how the triagebot work and how to setup a local testing environment.
 
 ## License
 
