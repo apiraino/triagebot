@@ -64,7 +64,7 @@ For commands that interact with a Github repository, you can set a test github r
 - Create Zulip organization
   `$ docker-compose exec -u zulip zulip /home/zulip/deployments/current/manage.py generate_realm_creation_link`
 
-and open the link received with a web browser. Once completed the wizard, the local Zulip instance is available. It cannot send emails unless you configure so, but it should not be needed for testing the triagebot.
+  and open the link received with a web browser. Once completed the wizard, the local Zulip instance is available. It cannot send emails unless you configure so, but it should not be needed for testing the triagebot.
 
 - Create a bot hook on Zulip (retrieve the address of your Docker network interface with `ip addr show docker0`). Type of the bot is "webkook outgoing".
 
@@ -90,7 +90,7 @@ $ cargo run --bin triagebot
 
 ## Zulip commands
 
-To test interactions from Zulip with the triagebot, open a private message session with it.
+To test interactions from Zulip to the triagebot, open on Zulip a private message session with it.
 
 Commands from Zulip to the triagebot maps roughly to the following `cURL` call:
 
@@ -123,3 +123,5 @@ Example payload:
   }
 }
 ```
+
+`sender_id` and `recipient_id` are Zulip ID, find [them here](https://github.com/rust-lang/team/tree/01392aee300df7df9fde50e3c259719309a93672/people).
