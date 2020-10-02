@@ -22,64 +22,62 @@ For commands that interact with a Github repository, you can set a test github r
 
 - Get a full Zulip installation [as a Docker container](https://github.com/zulip/docker-zulip):
 
-`$ docker pull zulip/docker-zulip`
+  `$ docker pull zulip/docker-zulip`
 
 - Configure Docker Compose for a full Zulip installation and configuration:
-`$ git clone https://github.com/zulip/docker-zulip.git && cd docker-zulip`
+  `$ git clone https://github.com/zulip/docker-zulip.git && cd docker-zulip`
 
 - Edit docker-compose.yml (as follows), this will let you conveniently access the Zulip Postgres DB and use it also for the triagebot:
-```
---- a/docker-compose.yml
-+++ b/docker-compose.yml
-@@ -8,9 +8,11 @@ services:
-       # Note that you need to do a manual `ALTER ROLE` query if you
-       # change this on a system after booting the postgres container
-       # the first time on a host.  Instructions are available in README.md.
--      POSTGRES_PASSWORD: 'REPLACE_WITH_SECURE_POSTGRES_PASSWORD'
-+      POSTGRES_PASSWORD: 'zulip'
-     volumes:
-       - '/opt/docker/zulip/postgresql/data:/var/lib/postgresql/data:rw'
-+    ports:
-+      - '5432:5432'
-   memcached:
-     image: 'memcached:alpine'
-     command:
-@@ -72,7 +74,7 @@ services:
-       # These should match RABBITMQ_DEFAULT_PASS, POSTGRES_PASSWORD,
-       # MEMCACHED_PASSWORD, and REDIS_PASSWORD above.
-       SECRETS_rabbitmq_password: 'REPLACE_WITH_SECURE_RABBITMQ_PASSWORD'
--      SECRETS_postgres_password: 'REPLACE_WITH_SECURE_POSTGRES_PASSWORD'
-+      SECRETS_postgres_password: 'zulip'
-       SECRETS_memcached_password: 'REPLACE_WITH_SECURE_MEMCACHED_PASSWORD'
-       SECRETS_redis_password: 'REPLACE_WITH_SECURE_REDIS_PASSWORD'
-       SECRETS_secret_key: 'REPLACE_WITH_SECURE_SECRET_KEY'
-```
+  ```
+  --- a/docker-compose.yml
+  +++ b/docker-compose.yml
+  @@ -8,9 +8,11 @@ services:
+         # Note that you need to do a manual `ALTER ROLE` query if you
+         # change this on a system after booting the postgres container
+         # the first time on a host.  Instructions are available in README.md.
+  -      POSTGRES_PASSWORD: 'REPLACE_WITH_SECURE_POSTGRES_PASSWORD'
+  +      POSTGRES_PASSWORD: 'zulip'
+       volumes:
+         - '/opt/docker/zulip/postgresql/data:/var/lib/postgresql/data:rw'
+  +    ports:
+  +      - '5432:5432'
+     memcached:
+       image: 'memcached:alpine'
+       command:
+  @@ -72,7 +74,7 @@ services:
+         # These should match RABBITMQ_DEFAULT_PASS, POSTGRES_PASSWORD,
+         # MEMCACHED_PASSWORD, and REDIS_PASSWORD above.
+         SECRETS_rabbitmq_password: 'REPLACE_WITH_SECURE_RABBITMQ_PASSWORD'
+  -      SECRETS_postgres_password: 'REPLACE_WITH_SECURE_POSTGRES_PASSWORD'
+  +      SECRETS_postgres_password: 'zulip'
+         SECRETS_memcached_password: 'REPLACE_WITH_SECURE_MEMCACHED_PASSWORD'
+         SECRETS_redis_password: 'REPLACE_WITH_SECURE_REDIS_PASSWORD'
+         SECRETS_secret_key: 'REPLACE_WITH_SECURE_SECRET_KEY'
+  ```
 
 - Pull all the containers
-`$ docker-compose start / docker-compose up -d`
+  `$ docker-compose start / docker-compose up -d`
 
 - Check if the instance is up
-`$ curl -i http://localhost`
+  `$ curl -i http://localhost`
 
 - Create Zulip organization
-`$ docker-compose exec -u zulip zulip /home/zulip/deployments/current/manage.py generate_realm_creation_link`
+  `$ docker-compose exec -u zulip zulip /home/zulip/deployments/current/manage.py generate_realm_creation_link`
 
-and open the link received with a web browser (pwd=Test1234)
-
-Once the web wizard is completed, the local Zulip instance is available. it cannot send emails unless you configure so, but it should not be needed for testing the triagebot.
+and open the link received with a web browser. Once completed the wizard, the local Zulip instance is available. It cannot send emails unless you configure so, but it should not be needed for testing the triagebot.
 
 - Create a bot hook on Zulip (retrieve the address of your Docker network interface with `ip addr show docker0`). Type of the bot is "webkook outgoing".
 
 ![screenshot](./zulip-bot-setup.png)
 
-Get the "zuliprc" and save it somewhere, example:
-```
-[api]
-email=test-bot@localhost.localdomain
-key=gddqQu1bbOn6nX90a0LPV1kOa9kdBLpE
-site=https://localhost.localdomain
-token=OEuFkrQRhL2m4VKgHEczaKloa7Rw87av
-```
+- Get the "zuliprc" and save it somewhere, example:
+  ```
+  [api]
+  email=test-bot@localhost.localdomain
+  key=gddqQu1bbOn6nX90a0LPV1kOa9kdBLpE
+  site=https://localhost.localdomain
+  token=OEuFkrQRhL2m4VKgHEczaKloa7Rw87av
+  ```
 
 ## Run the bot
 
