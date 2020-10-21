@@ -25,6 +25,7 @@ For commands that interact with a Github repository, you can set a test github r
   `$ docker pull zulip/docker-zulip`
 
 - Configure Docker Compose for a full Zulip installation and configuration:
+
   `$ git clone https://github.com/zulip/docker-zulip.git && cd docker-zulip`
 
 - Edit docker-compose.yml (as follows), this will let you conveniently access the Zulip Postgres DB and use it also for the triagebot:
@@ -56,17 +57,36 @@ For commands that interact with a Github repository, you can set a test github r
   ```
 
 - Pull all the containers
+
   `$ docker-compose start / docker-compose up -d`
 
-- Check if the instance is up
-  `$ curl -i http://localhost`
+- Check if the instance is up, you should receive a 301 from Zulip chat:
+  ```
+  $ curl -i http://localhost
+  HTTP/1.1 301 Moved Permanently
+  Server: nginx/1.14.0 (Ubuntu)
+  Date: Sun, 11 Oct 2020 11:25:21 GMT
+  Content-Type: text/html
+  Content-Length: 194
+  Connection: keep-alive
+  Location: https://localhost/
+  ```
 
 - Create Zulip organization
+
   `$ docker-compose exec -u zulip zulip /home/zulip/deployments/current/manage.py generate_realm_creation_link`
 
   and open the link received with a web browser. Once completed the wizard, the local Zulip instance is available. It cannot send emails unless you configure so, but it should not be needed for testing the triagebot.
 
-- Create a bot hook on Zulip (retrieve the address of your Docker network interface with `ip addr show docker0`). Type of the bot is "webkook outgoing".
+Let's say you create a `TestOrg` organization.
+
+From now on you should be able to login into the Zulip chat instance with the credentials you've just created.
+
+First visit this URL: `https://localhost.localdomain/accounts/login/`
+
+Then go to this URL and login (the CSS should look fine): `https://testorg.localhost.localdomain/accounts/login/`
+
+- Create a bot hook on Zulip (retrieve the address of your Docker network interface with `ip addr show docker0`), example: `http://172.17.0.1:8000/zulip-hook`. Type of the bot is "webkook outgoing".
 
   ![screenshot](./zulip-bot-setup.png)
 
@@ -108,7 +128,7 @@ curl -XPOST \
      -d '{...payload...}'
 ```
 
-The `payload` is a Zulip [Request](https://github.com/rust-lang/triagebot/blob/e60ffaddae21a8ad5763e4c8af3750c7151ae422/src/zulip.rs#L11-L33;) and contains command and parameters.
+The `payload` is a Zulip [Request](https://github.com/rust-lang/triagebot/blob/master/src/zulip.rs#L11-L33) and contains command and parameters.
 
 Example payload:
 ```json
@@ -119,9 +139,31 @@ Example payload:
     "sender_id": 123456,
     "recipient_id": 123456,
     "sender_full_name": "Jon Asch",
-    "type": "string"
+    "type": "stream"
   }
 }
 ```
 
-`sender_id` and `recipient_id` are Zulip ID, find [them here](https://github.com/rust-lang/team/tree/01392aee300df7df9fde50e3c259719309a93672/people).
+`data` contains the command, Zulip commands for issues [are documented here](https://forge.rust-lang.org/platforms/zulip/triagebot.html#issue-notifications). `sender_id` and `recipient_id` are valid Zulip ID, find [them here](https://github.com/rust-lang/team/tree/master/people).
+
+TODO: in order to have your local Zulip chat instance to send a valid Zulip user ID you have to chang the DB:
+```
+$ docker-compose exec -u postgres database bash`
+# psql -U postgres
+zulip=# update zerver_userprofile set id=<your-zulip-id> where id=10;
+```
+
+`data` is the command you want to send. Available commands are listed on the Triagebot wiki](https://github.com/rust-lang/triagebot/wiki).
+
+If you need to access docker containers:
+
+```
+$ cd docker-zulip`
+$ docker-compose exec -u root zulip bash` # the Zulip chat instance
+$ docker-compose exec -u postgres database bash` # the Postgres DB
+bash-5.0$ psql -U zulip
+psql (10.11)
+Type "help" for help.
+
+zulip=#
+```
