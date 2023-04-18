@@ -3,6 +3,7 @@ use crate::db::notifications::{self, delete_ping, move_indices, record_ping, Ide
 use crate::github::{self, GithubClient};
 use crate::handlers::Context;
 use anyhow::Context as _;
+use reqwest::StatusCode;
 use std::convert::TryInto;
 use std::env;
 use std::fmt::Write as _;
@@ -188,6 +189,15 @@ fn handle_command<'a>(
                                 })
                                 .unwrap(),
                             },
+                            // @triagebot beta approve 12345 "why we approved"
+                            Some("beta") => return match add_comment_to_issue(&ctx, message_data, words, Backport::beta()).await {
+                                Ok(r) => r,
+                                Err(e) => serde_json::to_string(&Response {
+                                    content: &format!("Failed to await at this time: {:?}", e),
+                                })
+                                .unwrap(),
+                            },
+
                             _ => {}
                         }
                     }
@@ -201,6 +211,119 @@ fn handle_command<'a>(
             },
         }
     })
+}
+
+struct Backport<'a> {
+    verb: &'a str,
+}
+
+impl Backport<'static> {
+    fn beta() -> Self {
+        Backport { verb: "accepted" }
+    }
+}
+
+// Add a comment to a Github issue/pr issuing a @rustbot command
+async fn add_comment_to_issue(
+    ctx: &Context,
+    message: &Message,
+    mut words: impl Iterator<Item = &str> + std::fmt::Debug,
+    _backport: Backport<'_>,
+) -> anyhow::Result<String> {
+    // rebuild the Zulip message public link that originated this event
+    let bot_api_token = env::var("ZULIP_API_TOKEN").expect("ZULIP_API_TOKEN");
+
+    // TODO: how to retrieve the Zulip message id?
+    let zulip_src_msg_id = 349127881;
+    let zulip_resp = ctx
+        .github
+        .raw()
+        .get(format!(
+            "https://rust-lang.zulipchat.com/api/v1/messages/{}",
+            zulip_src_msg_id
+        ))
+        .basic_auth(BOT_EMAIL, Some(&bot_api_token))
+        .send()
+        .await;
+
+    let zulip_msg_data = match zulip_resp {
+        Ok(data) => {
+            if data.status() != StatusCode::OK {
+                return Ok(serde_json::to_string(&Response {
+                    content: &format!("Zulip request denied: {:?}", data),
+                })
+                .unwrap());
+            }
+            data
+        }
+        Err(e) => {
+            return Ok(serde_json::to_string(&Response {
+                content: &format!("Failed to get Zulip msg: {:?}.", e),
+            })
+            .unwrap());
+        }
+    };
+
+    #[derive(serde::Deserialize)]
+    struct ZulipReply {
+        message: ZulipMessage,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ZulipMessage {
+        id: u32,
+        subject: String, // ex.: "[weekly] 2023-04-13"
+    }
+
+    log::debug!("Zulip reply {:?}", zulip_msg_data);
+
+    let zulip_msg_data = zulip_msg_data.json::<ZulipReply>().await.expect("TODO");
+
+    // example: "https://rust-lang.zulipchat.com/#narrow/stream/238009-t-compiler.2Fmeetings/topic/.5Bweekly.5D.202023-04-13/near/349127881";
+    let zulip_src_msg_link = format!("https://rust-lang.zulipchat.com/#narrow/stream/238009-t-compiler.2Fmeetings/topic/{}/near/{}", zulip_msg_data.message.subject, zulip_msg_data.message.id);
+    // TODO: urlencode
+    // urlencoding::encode(&zulip_src_msg_link);
+
+    let verb = match words.next() {
+        Some(verb) => verb,
+        None => anyhow::bail!("no issue # provided"),
+    };
+
+    let issue_id = match words.next() {
+        Some(issue_id) => issue_id.parse::<u64>().expect("TODO"),
+        None => anyhow::bail!("no issue # provided"),
+    };
+
+    let comment = words.next();
+
+    // post this comment on Github
+    // Beta backport {verb} as per compiler team [on Zulip](#)
+    // @rustbot label +beta-accepted
+    //
+    // Optional comment ...
+
+    // TODO: do we already have an octocrab instance around?
+    let mut comment_body = format!(
+        "Beta backport {} as per compiler team [on Zulip]({})",
+        verb, zulip_src_msg_link
+    );
+    match verb {
+        "accepted" => comment_body.push_str(&format!("\n\n@rustbot label +beta-accepted")),
+        "declined" => comment_body.push_str(&format!("\n\n@rustbot label -beta-nominated")),
+        &_ => todo!("use a struct?"),
+    };
+    if comment.is_some() {
+        comment_body.push_str(&format!("\n\n{}", comment.unwrap()));
+    }
+    let comment = ctx
+        .octocrab
+        .issues("owner", "repo")
+        .create_comment(issue_id, comment_body)
+        .await?;
+
+    log::debug!("Created comment to issue #{}: {:?}", issue_id, comment);
+
+    Ok("OK".to_string())
 }
 
 // This does two things:
