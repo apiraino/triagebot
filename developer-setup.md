@@ -188,9 +188,18 @@ Then fire up the bot (it will connect to the Dockerized DB): `RUST_LOG=debug car
 TODO
 
 Now open on your Zulip instance a private message session with the bot you created earlier. Send it any message, you should see the bot reply with something like:
-`Unknown Zulip user. Please add zulip-id = 12 to your file in rust-lang/team.`
+`Unknown Zulip user. Please add zulip-id = xxx to your file in rust-lang/team.`
 
-Edit the file `mocks/zulip-map.json` replacing `ZULIP_ID` with 12.
+Edit the file `mocks/zulip-map.json`, the format is:
+```
+{
+  "users": {
+    "ZULIP_USER_ID": GH_USER_ID
+  }
+}
+```
+
+replacing `ZULIP_USER_ID` with the Zulip user id of the test instance and `GH_USER_ID` with your real GitHub user.
 
 Send again a message and the rustbot should reply with "Unknown command". Congratulations, you can talk from your Zulip instance to your local triagebot.
 
