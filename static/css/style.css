@@ -1,0 +1,73 @@
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #252d30;
+    filter: invert(70%);
+  }
+}
+
+td, th {
+  border: 1px solid #cacaca;
+  padding: 5px;
+  text-align: center;
+  /* vertical-align: middle; */
+}
+
+form {
+  display: table;
+}
+
+div.form-example {
+  display: table-row;
+}
+
+input {
+  display: inline-flex;
+  margin-bottom: 10px;
+  vertical-align: middle;
+}
+
+input[type='number']{
+    width: 60px;
+}
+
+label {
+  display:block;
+  vertical-align: middle;
+}
+
+.title {
+  text-align: center;
+}
+
+/* Courtesy w3schools */
+.tooltip {
+  position: relative;
+  display: inline-block;
+  border-bottom: 1px dotted black;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 240px;
+  background-color: black;
+  color: #fff;
+  text-align: center;
+  border-radius: 6px;
+  padding: 5px;
+
+  /* Position the tooltip */
+  position: absolute;
+  z-index: 1;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+}
+
+.success {
+  color: green;
+}
+
+.fail {
+  color: red;
+}

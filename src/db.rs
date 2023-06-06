@@ -273,4 +273,16 @@ CREATE UNIQUE INDEX jobs_name_scheduled_at_unique_index
         name, scheduled_at
     );
 ",
+    "
+CREATE table review_capacity (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    max_assigned_prs INTEGER,
+    pto_date_start date,
+    pto_date_end date,
+    active boolean default true,
+    allow_ping_after_days INTEGER,
+    publish_prefs boolean NOT NULL DEFAULT false
+);
+",
 ];

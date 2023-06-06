@@ -6,13 +6,18 @@ use futures::StreamExt;
 use hyper::{header, Body, Request, Response, Server, StatusCode};
 use reqwest::Client;
 use route_recognizer::Router;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::{env, net::SocketAddr, sync::Arc};
+use tokio::io::AsyncReadExt;
 use tokio::{task, time};
+use tokio_postgres::Client as DbClient;
 use tower::{Service, ServiceExt};
 use tracing as log;
 use tracing::Instrument;
 use triagebot::jobs::{jobs, JOB_PROCESSING_CADENCE_IN_SECS, JOB_SCHEDULING_CADENCE_IN_SECS};
 use triagebot::{db, github, handlers::Context, notification_listing, payload, EventName};
+use uuid::Uuid;
 
 async fn handle_agenda_request(req: String) -> anyhow::Result<String> {
     if req == "/agenda/lang/triage" {
@@ -23,6 +28,171 @@ async fn handle_agenda_request(req: String) -> anyhow::Result<String> {
     }
 
     anyhow::bail!("Unknown agenda; see /agenda for index.")
+}
+
+#[derive(Deserialize)]
+struct Config {
+    people: People,
+}
+
+#[derive(Deserialize)]
+struct People {
+    members: Vec<String>,
+}
+
+async fn get_string_from_file(dest: &mut Vec<String>, s: &str) {
+    let mut fd = tokio::fs::File::open(s)
+        .await
+        .unwrap_or_else(|err| panic!("Error opening file {}: {}", s, err));
+    let mut contents = String::new();
+    fd.read_to_string(&mut contents)
+        .await
+        .unwrap_or_else(|err| panic!("Error loading file {}: {}", s, err));
+    contents = contents.trim_end().to_string();
+    let mut config: Config = toml::from_str(&contents).unwrap();
+    dest.append(&mut config.people.members);
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReviewCapacityUser {
+    pub username: String,
+    pub id: uuid::Uuid,
+    pub user_id: i64,
+    pub max_assigned_prs: Option<i32>,
+    pub pto_date_start: Option<chrono::NaiveDate>,
+    pub pto_date_end: Option<chrono::NaiveDate>,
+    pub active: bool,
+    pub allow_ping_after_days: Option<i32>,
+    pub publish_prefs: bool,
+}
+
+const PREF_ALLOW_PING_AFTER_DAYS: i32 = 20;
+const PREF_MAX_ASSIGNED_PRS: i32 = 5;
+
+impl From<HashMap<String, String>> for ReviewCapacityUser {
+    fn from(obj: HashMap<String, String>) -> Self {
+        Self {
+            username: obj.get("username").unwrap().to_string(),
+            id: Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
+            user_id: obj.get("user_id").unwrap().parse::<i64>().unwrap(),
+            max_assigned_prs: Some(
+                obj.get("max_assigned_prs")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap_or(PREF_MAX_ASSIGNED_PRS),
+            ),
+            pto_date_start: Some(
+                obj.get("pto_date_start")
+                    .unwrap()
+                    .parse::<chrono::NaiveDate>()
+                    .unwrap(),
+            ),
+            pto_date_end: Some(
+                obj.get("pto_date_start")
+                    .unwrap()
+                    .parse::<chrono::NaiveDate>()
+                    .unwrap(),
+            ),
+            active: {
+                let _obj = obj.get("active");
+                if _obj.is_none() || _obj.unwrap() == "no" {
+                    false
+                } else {
+                    true
+                }
+            },
+            allow_ping_after_days: Some(
+                obj.get("allow_ping_after_days")
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap_or(PREF_ALLOW_PING_AFTER_DAYS),
+            ),
+            publish_prefs: {
+                let _obj = obj.get("publish_prefs");
+                if _obj.is_none() || _obj.unwrap() == "no" {
+                    false
+                } else {
+                    true
+                }
+            },
+        }
+    }
+}
+
+impl From<tokio_postgres::row::Row> for ReviewCapacityUser {
+    fn from(row: tokio_postgres::row::Row) -> Self {
+        Self {
+            username: row.get("username"),
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            max_assigned_prs: row.get("max_assigned_prs"),
+            pto_date_start: row.get("pto_date_start"),
+            pto_date_end: row.get("pto_date_end"),
+            active: row.get("active"),
+            allow_ping_after_days: row.get("allow_ping_after_days"),
+            publish_prefs: row.get("publish_prefs"),
+        }
+    }
+}
+
+pub async fn set_prefs(
+    db: &DbClient,
+    prefs: ReviewCapacityUser,
+) -> anyhow::Result<ReviewCapacityUser> {
+    let q = "
+UPDATE review_capacity r
+SET max_assigned_prs = $2, pto_date_start = $3, pto_date_end = $4, active = $5, allow_ping_after_days = $6, publish_prefs = $7
+FROM users u
+WHERE r.user_id=$1 AND u.user_id=r.user_id
+RETURNING u.username, r.*";
+    log::debug!("pref {:?}", prefs);
+    log::debug!("SQL {:?}", q);
+    let rec = db
+        .query_one(
+            q,
+            &[
+                &prefs.user_id,
+                &prefs.max_assigned_prs,
+                &prefs.pto_date_start,
+                &prefs.pto_date_end,
+                &prefs.active,
+                &prefs.allow_ping_after_days,
+                &prefs.publish_prefs,
+            ],
+        )
+        .await
+        .context("Update DB error")?;
+    Ok(rec.into())
+}
+
+/// Get all review capacity preferences
+/// me: sort "me" at the top of the list
+/// is_admin: pull also not public profiles
+pub async fn get_prefs(
+    db: &DbClient,
+    users: &mut Vec<String>,
+    me: &str,
+    is_admin: bool,
+) -> Vec<ReviewCapacityUser> {
+    let only_public_prefs = if !is_admin {
+        " AND publish_prefs = true "
+    } else {
+        ""
+    };
+    let q = format!(
+        "
+SELECT username,review_capacity.*
+FROM review_capacity
+JOIN users on review_capacity.user_id=users.user_id
+WHERE username = any($1) {}
+ORDER BY case when username='{}' then 1 else 2 end, username;",
+        only_public_prefs, me
+    );
+
+    let rows = db.query(&q, &[users]).await.unwrap();
+    rows.into_iter()
+        .map(|row| ReviewCapacityUser::from(row))
+        .collect()
 }
 
 async fn serve_req(
@@ -143,6 +313,63 @@ async fn serve_req(
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .body(Body::from(triagebot::zulip::respond(&ctx, req).await))
+            .unwrap());
+    }
+    if req.uri.path() == "/review-settings" {
+        let mut body = serde_json::json!({});
+        let db_client = ctx.db.get().await;
+
+        if req.method == hyper::Method::POST {
+            let mut c = body_stream;
+            let mut payload = Vec::new();
+            while let Some(chunk) = c.next().await {
+                let chunk = chunk?;
+                payload.extend_from_slice(&chunk);
+            }
+            let prefs = url::form_urlencoded::parse(payload.as_ref())
+                .into_owned()
+                .collect::<HashMap<String, String>>();
+            log::debug!("prefs {:?}", prefs);
+
+            // save changes
+            let review_capacity = set_prefs(&db_client, prefs.into()).await.unwrap();
+            log::debug!("Users from DB {:?}", review_capacity);
+            body = serde_json::json!(&review_capacity);
+        }
+
+        if req.method == hyper::Method::GET {
+            // TODO: infer these from the authentication
+            let user = req
+                .headers
+                .get("Role")
+                .ok_or_else(|| header::HeaderValue::from_static(""))
+                .unwrap()
+                .to_str()
+                .unwrap_or("pnkfelix");
+            let is_admin = user == "pnkfelix";
+            log::debug!("user={}, is admin: {}", user, is_admin);
+
+            // 1. download the TOML file(s) for that team, ex.:
+            // https://raw.githubusercontent.com/rust-lang/team/master/teams/compiler.toml
+            // https://raw.githubusercontent.com/rust-lang/team/master/teams/compiler-contributors.toml
+
+            // 2. parse the TOML file and load all [people.members]
+            let mut members = vec![];
+            get_string_from_file(&mut members, "static/compiler.toml").await;
+            get_string_from_file(&mut members, "static/compiler-contributors.toml").await;
+            log::debug!("Members loaded {:?}", members);
+
+            // 3. query the DB, pull all users that are members in the TOML file
+            let review_capacity = get_prefs(&db_client, &mut members, user, is_admin).await;
+            log::debug!("Users from DB {:?}", review_capacity);
+            body = serde_json::json!(&review_capacity);
+        }
+
+        return Ok(Response::builder()
+            .header("Content-Type", "application/json")
+            .status(StatusCode::OK)
+            .body(Body::from(body.to_string()))
+            // .body(Body::from(triagebot::zulip::respond(&ctx, params).await))
             .unwrap());
     }
     if req.uri.path() != "/github-hook" {
