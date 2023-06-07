@@ -8,11 +8,13 @@
         <form id="review-capacity-form" method="post" class="form-example" accept-charset="utf-8">
             <table>
                 <thead>
-                    <tr><td colspan=6 class="title" id="message"><h2></h2></td></tr>
+                    <tr>
+                        <td colspan=5 class="title" id="message"><h2></h2></td>
+                        <td><span>Testing: <a href="/?user=pnkfelix">I am an admin</a> | <a href="/?user=jackh726">I am a user</a></span></td>
+                    </tr>
                     <tr>
                         <td colspan=6 class="title">
                             <h2>Rust project review capacity</h2>
-                            <span><a href="/?user=pnkfelix">I am an admin</a></span> | <span><a href="/?user=jackh726">I am a user</a></span>
                         </td></tr>
                     <tr><td colspan=6 class="title"><h4>This <i>beautiful</i> backoffice will allow you to set your own review capacity.<br />These settings will be automatically loaded by the Triagebot when assigning a review</h4></td></tr>
                     <tr>
@@ -28,10 +30,10 @@
                     <tr><td colspan=6 class="title">My prefs</td></tr>
                 </tbody>
                 <tbody>
-                    <tr><td colspan=6 class="title"><input type="button" value="Save my settings" onClick="postData(this);"/></td></tr>
+                    <tr><td colspan=6 class="title"><input id=save_settings type="button" value="Save my settings" onClick="postData();"/></td></tr>
                 </tbody>
                 <tbody id="other_prefs">
-                    <tr><td colspan=6 class="title">My team prefs</td></tr>
+                    <tr><td colspan=6 class="title">My team prefs (READONLY)</td></tr>
                 </tbody>
             </table>
         </form>

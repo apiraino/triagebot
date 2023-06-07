@@ -71,51 +71,78 @@ const PREF_MAX_ASSIGNED_PRS: i32 = 5;
 
 impl From<HashMap<String, String>> for ReviewCapacityUser {
     fn from(obj: HashMap<String, String>) -> Self {
-        Self {
+        // if user set themselves as inactive
+        // delete all their prefs
+        let active = {
+            let _o = obj.get("active");
+            if _o.is_none() || _o.unwrap() == "no" {
+                false
+            } else {
+                true
+            }
+        };
+
+        let max_assigned_prs = if active {
+            if let Some(x) = obj.get("max_assigned_prs") {
+                Some(x.parse::<i32>().unwrap_or(PREF_MAX_ASSIGNED_PRS))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let pto_date_start = if active {
+            if let Some(x) = obj.get("pto_date_start") {
+                Some(x.parse::<chrono::NaiveDate>().unwrap())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let pto_date_end = if active {
+            if let Some(x) = obj.get("pto_date_end") {
+                Some(x.parse::<chrono::NaiveDate>().unwrap())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let allow_ping_after_days = if active {
+            if let Some(x) = obj.get("allow_ping_after_days") {
+                Some(x.parse::<i32>().unwrap_or(PREF_ALLOW_PING_AFTER_DAYS))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let publish_prefs = {
+            let _obj = obj.get("publish_prefs");
+            if _obj.is_none() || _obj.unwrap() == "no" {
+                false
+            } else {
+                true
+            }
+        };
+
+        let prefs = ReviewCapacityUser {
             username: obj.get("username").unwrap().to_string(),
             id: Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
             user_id: obj.get("user_id").unwrap().parse::<i64>().unwrap(),
-            max_assigned_prs: Some(
-                obj.get("max_assigned_prs")
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap_or(PREF_MAX_ASSIGNED_PRS),
-            ),
-            pto_date_start: Some(
-                obj.get("pto_date_start")
-                    .unwrap()
-                    .parse::<chrono::NaiveDate>()
-                    .unwrap(),
-            ),
-            pto_date_end: Some(
-                obj.get("pto_date_start")
-                    .unwrap()
-                    .parse::<chrono::NaiveDate>()
-                    .unwrap(),
-            ),
-            active: {
-                let _obj = obj.get("active");
-                if _obj.is_none() || _obj.unwrap() == "no" {
-                    false
-                } else {
-                    true
-                }
-            },
-            allow_ping_after_days: Some(
-                obj.get("allow_ping_after_days")
-                    .unwrap()
-                    .parse::<i32>()
-                    .unwrap_or(PREF_ALLOW_PING_AFTER_DAYS),
-            ),
-            publish_prefs: {
-                let _obj = obj.get("publish_prefs");
-                if _obj.is_none() || _obj.unwrap() == "no" {
-                    false
-                } else {
-                    true
-                }
-            },
-        }
+            max_assigned_prs,
+            pto_date_start,
+            pto_date_end,
+            active,
+            allow_ping_after_days,
+            publish_prefs,
+        };
+        prefs
     }
 }
 
