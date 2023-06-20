@@ -8,7 +8,8 @@ use crate::github::PullRequestDetails;
 use anyhow::Context;
 use handlers::HandlerError;
 use interactions::ErrorComment;
-use std::fmt;
+use serde::Serialize;
+use std::{collections::HashMap, fmt};
 use tracing as log;
 
 pub mod actions;
@@ -259,5 +260,126 @@ pub async fn webhook(
         )))
     } else {
         Ok(true)
+    }
+}
+
+const PREF_ALLOW_PING_AFTER_DAYS: i32 = 20;
+const PREF_MAX_ASSIGNED_PRS: i32 = 5;
+
+#[derive(Debug, Serialize)]
+pub struct ReviewCapacityUser {
+    pub username: String,
+    pub id: uuid::Uuid,
+    pub user_id: i64,
+    pub cur_assigned_prs: Option<i32>,
+    pub max_assigned_prs: Option<i32>,
+    pub pto_date_start: Option<chrono::NaiveDate>,
+    pub pto_date_end: Option<chrono::NaiveDate>,
+    pub active: bool,
+    pub allow_ping_after_days: Option<i32>,
+    pub publish_prefs: bool,
+}
+
+impl From<HashMap<String, String>> for ReviewCapacityUser {
+    fn from(obj: HashMap<String, String>) -> Self {
+        // Note: if user set themselves as inactive all other prefs will be ignored
+        let active = {
+            let _o = obj.get("active");
+            if _o.is_none() || _o.unwrap() == "no" {
+                false
+            } else {
+                true
+            }
+        };
+
+        let cur_assigned_prs = if active {
+            if let Some(x) = obj.get("cur_assigned_prs") {
+                Some(x.parse::<i32>().unwrap())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let max_assigned_prs = if active {
+            if let Some(x) = obj.get("max_assigned_prs") {
+                Some(x.parse::<i32>().unwrap_or(PREF_MAX_ASSIGNED_PRS))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let pto_date_start = if active {
+            if let Some(x) = obj.get("pto_date_start") {
+                Some(x.parse::<chrono::NaiveDate>().unwrap())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let pto_date_end = if active {
+            if let Some(x) = obj.get("pto_date_end") {
+                Some(x.parse::<chrono::NaiveDate>().unwrap())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let allow_ping_after_days = if active {
+            if let Some(x) = obj.get("allow_ping_after_days") {
+                Some(x.parse::<i32>().unwrap_or(PREF_ALLOW_PING_AFTER_DAYS))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let publish_prefs = {
+            let _obj = obj.get("publish_prefs");
+            if _obj.is_none() || _obj.unwrap() == "no" {
+                false
+            } else {
+                true
+            }
+        };
+
+        let prefs = ReviewCapacityUser {
+            username: obj.get("username").unwrap().to_string(),
+            id: uuid::Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
+            user_id: obj.get("user_id").unwrap().parse::<i64>().unwrap(),
+            cur_assigned_prs,
+            max_assigned_prs,
+            pto_date_start,
+            pto_date_end,
+            active,
+            allow_ping_after_days,
+            publish_prefs,
+        };
+        prefs
+    }
+}
+
+impl From<tokio_postgres::row::Row> for ReviewCapacityUser {
+    fn from(row: tokio_postgres::row::Row) -> Self {
+        Self {
+            username: row.get("username"),
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            cur_assigned_prs: row.get("cur_assigned_prs"),
+            max_assigned_prs: row.get("max_assigned_prs"),
+            pto_date_start: row.get("pto_date_start"),
+            pto_date_end: row.get("pto_date_end"),
+            active: row.get("active"),
+            allow_ping_after_days: row.get("allow_ping_after_days"),
+            publish_prefs: row.get("publish_prefs"),
+        }
     }
 }
