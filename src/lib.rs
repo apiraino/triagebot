@@ -271,7 +271,8 @@ pub struct ReviewCapacityUser {
     pub username: String,
     pub id: uuid::Uuid,
     pub user_id: i64,
-    pub cur_assigned_prs: Option<i32>,
+    pub assigned_prs: Vec<i32>,
+    pub num_assigned_prs: Option<i32>,
     pub max_assigned_prs: Option<i32>,
     pub pto_date_start: Option<chrono::NaiveDate>,
     pub pto_date_end: Option<chrono::NaiveDate>,
@@ -292,8 +293,22 @@ impl From<HashMap<String, String>> for ReviewCapacityUser {
             }
         };
 
-        let cur_assigned_prs = if active {
-            if let Some(x) = obj.get("cur_assigned_prs") {
+        let assigned_prs = if active {
+            if let Some(x) = obj.get("assigned_prs") {
+                x.parse::<String>()
+                    .unwrap()
+                    .split(",")
+                    .map(|x| x.parse::<i32>().unwrap())
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        let num_assigned_prs = if active {
+            if let Some(x) = obj.get("num_assigned_prs") {
                 Some(x.parse::<i32>().unwrap())
             } else {
                 None
@@ -355,7 +370,8 @@ impl From<HashMap<String, String>> for ReviewCapacityUser {
             username: obj.get("username").unwrap().to_string(),
             id: uuid::Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
             user_id: obj.get("user_id").unwrap().parse::<i64>().unwrap(),
-            cur_assigned_prs,
+            assigned_prs,
+            num_assigned_prs,
             max_assigned_prs,
             pto_date_start,
             pto_date_end,
@@ -373,7 +389,8 @@ impl From<tokio_postgres::row::Row> for ReviewCapacityUser {
             username: row.get("username"),
             id: row.get("id"),
             user_id: row.get("user_id"),
-            cur_assigned_prs: row.get("cur_assigned_prs"),
+            assigned_prs: row.get("assigned_prs"),
+            num_assigned_prs: row.get("num_assigned_prs"),
             max_assigned_prs: row.get("max_assigned_prs"),
             pto_date_start: row.get("pto_date_start"),
             pto_date_end: row.get("pto_date_end"),

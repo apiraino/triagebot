@@ -491,18 +491,8 @@ pub(super) async fn handle_command(
         };
         log::debug!("PR assignee is now {}", username);
         set_assignee(issue, &ctx.github, &username).await;
-        // register the PR in the reviewer's work queue
-        // TODO: Can I trigger an `IssuesAction::Assigned` and delegate handlers::review_prefs::handle_input() instead?
-        let prefs = get_reviewer_prefs_by_nick(&db_client, &username)
-            .await
-            .unwrap();
-        update_assigned_prs(
-            &db_client,
-            prefs.user_id,
-            prefs.cur_assigned_prs.unwrap() + 1,
-        )
-        .await
-        .unwrap();
+        // This PR will be registered in the reviewer's work queue using a `IssuesAction::Assigned`
+        // and its delegate `handlers::review_prefs::handle_input()`
         return Ok(());
     }
 

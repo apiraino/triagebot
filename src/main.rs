@@ -221,7 +221,6 @@ async fn serve_req(
 
             // save changes
             let review_capacity = set_prefs(&db_client, prefs).await.unwrap();
-            log::debug!("Users from DB {:?}", review_capacity);
             body = serde_json::json!(&review_capacity);
         }
 
@@ -239,7 +238,6 @@ async fn serve_req(
 
             // query the DB, pull all users that are members in the TOML file
             let review_capacity = get_prefs(&db_client, &mut members, user, is_admin).await;
-            log::debug!("Users from DB {:?}", review_capacity);
             body = serde_json::json!(&review_capacity);
         }
 

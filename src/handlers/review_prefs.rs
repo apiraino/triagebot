@@ -24,7 +24,6 @@ FROM users u
 WHERE r.user_id=$1 AND u.user_id=r.user_id
 RETURNING u.username, r.*";
     log::debug!("pref {:?}", prefs);
-    log::debug!("SQL {:?}", q);
     let rec = db
         .query_one(
             q,
@@ -88,24 +87,22 @@ AND username='{}'",
         gh_nick
     );
     log::debug!("get reviewer by nick {:?}", gh_nick);
-    log::debug!("SQL {:?}", q);
     let rec = db.query_one(&q, &[]).await.context("Select DB error")?;
     Ok(rec.into())
 }
 
 pub async fn get_reviewer_prefs_by_capacity(db: &DbClient) -> anyhow::Result<ReviewCapacityUser> {
     let q = "
-SELECT username, r.*, sum(r.max_assigned_prs - r.cur_assigned_prs) as avail_slots
+SELECT username, r.*, sum(r.max_assigned_prs - r.num_assigned_prs) as avail_slots
 FROM review_capacity r
 JOIN users on users.user_id=r.user_id
 WHERE active = true
 AND current_date NOT BETWEEN pto_date_start AND pto_date_end
-AND cur_assigned_prs < max_assigned_prs
+AND num_assigned_prs < max_assigned_prs
 GROUP BY username, r.id
 ORDER BY avail_slots DESC
 LIMIT 1";
     log::debug!("get reviewers by capacity");
-    log::debug!("SQL {:?}", q);
     let rec = db.query_one(q, &[]).await.context("Select DB error")?;
     Ok(rec.into())
 }
@@ -130,14 +127,11 @@ pub(super) async fn parse_input(
     match event.action {
         IssuesAction::Assigned => {
             log::debug!("[review_prefs] PR assigned: Will add to work queue");
-            Ok(None)
+            Ok(Some(ReviewPrefsInput {}))
         }
         IssuesAction::Unassigned | IssuesAction::Closed => {
-            // TODO: find a way to decrease the work queue of the assignee of this PR.
-            // event.issue.user.login is empty so we don't know who was the assignee of this PR
-            // see their docs: https://docs.github.com/en/webhooks-and-events/webhooks/webhook-events-and-payloads?actionType=unassigned#pull_request
             log::debug!("[review_prefs] PR unassigned: Will remove from work queue");
-            Ok(None)
+            Ok(Some(ReviewPrefsInput {}))
         }
         _ => {
             log::debug!("[review_prefs] Other action on PR {:?}", event.action);
@@ -149,17 +143,17 @@ pub(super) async fn parse_input(
 pub async fn update_assigned_prs(
     db: &DbClient,
     user_id: i64,
-    cur_assigned_prs: i32,
+    assigned_prs: Vec<i32>,
 ) -> anyhow::Result<ReviewCapacityUser> {
     let q = "
 UPDATE review_capacity r
-SET cur_assigned_prs = $2
+SET assigned_prs = $2, num_assigned_prs = $3
 FROM users u
 WHERE r.user_id=$1 AND u.user_id=r.user_id
 RETURNING u.username, r.*";
-    log::debug!("SQL {:?}", q);
+    let num_assigned_prs = assigned_prs.len() as i32;
     let rec = db
-        .query_one(q, &[&user_id, &cur_assigned_prs])
+        .query_one(q, &[&user_id, &assigned_prs, &num_assigned_prs])
         .await
         .context("Update DB error")?;
     Ok(rec.into())
@@ -171,23 +165,36 @@ pub(super) async fn handle_input<'a>(
     event: &IssuesEvent,
     _inputs: ReviewPrefsInput,
 ) -> anyhow::Result<()> {
+    log::debug!("[review_prefs] handle_input");
     let db_client = ctx.db.get().await;
 
     if event.issue.user.login.is_empty() {
         todo!("When unassigning a PR, we don't receive the assignee that is removed so we don't know who was unassigned this PR");
     }
 
-    let prefs = get_reviewer_prefs_by_nick(&db_client, &event.issue.user.login)
+    let mut prefs = get_reviewer_prefs_by_nick(&db_client, &event.issue.user.login)
         .await
         .unwrap();
 
-    let amount_change = match event.action {
-        IssuesAction::Assigned => prefs.cur_assigned_prs.unwrap() + 1,
-        IssuesAction::Unassigned | IssuesAction::Closed => prefs.cur_assigned_prs.unwrap() - 1,
-        _ => 0,
+    // either add or remove the PR from the list of assigned PRs for this user
+    match event.action {
+        IssuesAction::Assigned => prefs.assigned_prs.push(event.issue.number as i32),
+        IssuesAction::Unassigned | IssuesAction::Closed => {
+            let index = prefs
+                .assigned_prs
+                .iter()
+                .position(|x| *x == event.issue.number as i32)
+                .unwrap();
+            prefs.assigned_prs.swap_remove(index);
+        }
+        _ => {
+            // unhandled action, do nothing
+            log::debug!("Unhandled action {:?}, bail out.", event.action);
+            return Ok(());
+        }
     };
 
-    let _pref_updated = update_assigned_prs(&db_client, prefs.user_id, amount_change)
+    let _pref_updated = update_assigned_prs(&db_client, prefs.user_id, prefs.assigned_prs)
         .await
         .unwrap();
 
