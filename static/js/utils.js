@@ -29,8 +29,8 @@ async function update_view(content, msg, result_class) {
   container.classList.add(result_class);
 
   // populate table
-  var my_prefs = document.getElementById("my_prefs");
-  var other_prefs = document.getElementById("other_prefs");
+  var my_prefs = document.getElementById("my-prefs");
+  var other_prefs = document.getElementById("other-prefs");
   var my_row = '';
   var other_rows = '';
   for (var i=0; i<content.length; i++) {
@@ -56,7 +56,7 @@ async function update_view(content, msg, result_class) {
 <td><label><input id=active name=active type=checkbox ${active} onClick="enableDisableFields(this.checked);"></label></td>
 <td>
   <input id=enable_max_assigned_prs name=enable_max_assigned_prs type=checkbox checked=checked ${disabled} onClick="enableDisableField(this.checked);">
-  ${obj.cur_assigned_prs} / <input id=max_assigned_prs name=max_assigned_prs type=number value=${obj.max_assigned_prs} ${disabled}>
+  ${obj.num_assigned_prs} / <input id=max_assigned_prs name=max_assigned_prs type=number value=${obj.max_assigned_prs} ${disabled}>
 <td>
   <input id=pto_date_start name=pto_date_start type=date value=${pto_start} ${disabled}>&nbsp;
   <input id=pto_date_end name=pto_date_end type=date value=${pto_end} ${disabled}>
@@ -70,13 +70,13 @@ async function update_view(content, msg, result_class) {
 <tr>
 <td><a href="https://github.com/rust-lang/rust/pulls/assigned/${obj.username}">${obj.username}</a></td>
 <td><label><input id=x type=checkbox ${active} disabled></label></td>
-<td>${obj.cur_assigned_prs} / <input id=x type=number value=${obj.max_assigned_prs} disabled></td>
+<td>${obj.num_assigned_prs} / <input id=x type=number value=${obj.max_assigned_prs} disabled></td>
 <td>
   <input id=x type=date value=${pto_start} disabled>&nbsp;
   <input id=x type=date value=${pto_end} disabled>
 </td>
 <td><input id=x type=number value=${obj.allow_ping_after_days} disabled></td>
-<td><label><input id=x class=${publish?"checkboxtrue":"checkboxfalse"} type=checkbox ${publish} disabled></label></td>
+<td><label class="checkboxfalse"><input id=x class=${publish?"checkboxtrue":"checkboxfalse"} type=checkbox ${publish}></label></td>
 </tr>
 `;
     }

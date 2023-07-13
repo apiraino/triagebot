@@ -20,9 +20,7 @@
 use crate::{
     config::AssignConfig,
     github::{self, Event, Issue, IssuesAction, Selection},
-    handlers::review_prefs::{
-        get_reviewer_prefs_by_capacity, get_reviewer_prefs_by_nick, update_assigned_prs,
-    },
+    handlers::review_prefs::{get_reviewer_prefs_by_capacity, get_reviewer_prefs_by_nick},
     handlers::{Context, GithubClient, IssuesEvent},
     interactions::EditIssueBody,
     ReviewCapacityUser,

@@ -7,7 +7,7 @@
     border: green;
   }
   .checkboxfalse {
-    border: red;
+    pointer-events: none;
   }
 }
 
