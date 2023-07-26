@@ -95,8 +95,18 @@ pub(crate) struct AssignConfig {
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
 pub(crate) struct NoMergesConfig {
+    /// No action will be taken on PRs with these labels.
     #[serde(default)]
-    _empty: (),
+    pub(crate) exclude_labels: Vec<String>,
+    /// Set these labels on the PR when merge commits are detected.
+    #[serde(default)]
+    pub(crate) labels: Vec<String>,
+    /// Override the default message to post when merge commits are detected.
+    ///
+    /// This message will always be followed up with
+    /// "The following commits are merge commits:" and then
+    /// a list of the merge commits.
+    pub(crate) message: Option<String>,
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
@@ -170,6 +180,8 @@ pub(crate) struct AutolabelLabelConfig {
     pub(crate) trigger_files: Vec<String>,
     #[serde(default)]
     pub(crate) new_pr: bool,
+    #[serde(default)]
+    pub(crate) new_issue: bool,
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
@@ -307,10 +319,13 @@ impl fmt::Display for ConfigurationError {
                  Add a `triagebot.toml` in the root of the default branch to enable it."
             ),
             ConfigurationError::Toml(e) => {
-                write!(f, "Malformed `triagebot.toml` in default branch.\n{}", e)
+                write!(f, "Malformed `triagebot.toml` in default branch.\n{e}")
             }
-            ConfigurationError::Http(_) => {
-                write!(f, "Failed to query configuration for this repository.")
+            ConfigurationError::Http(e) => {
+                write!(
+                    f,
+                    "Failed to query configuration for this repository.\n{e:?}"
+                )
             }
         }
     }

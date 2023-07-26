@@ -124,6 +124,7 @@ impl GithubClient {
                         .unwrap(),
                 )
                 .await?;
+            rate_resp.error_for_status_ref()?;
             let rate_limit_response = rate_resp.json::<RateLimitResponse>().await?;
 
             // Check url for search path because github has different rate limits for the search api
@@ -987,6 +988,7 @@ pub struct Repository {
     pub default_branch: String,
     #[serde(default)]
     pub fork: bool,
+    pub parent: Option<Box<Repository>>,
 }
 
 #[derive(Copy, Clone)]
@@ -1226,7 +1228,7 @@ impl Repository {
         client: &GithubClient,
         refname: &str,
         sha: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<GitReference> {
         let url = format!("{}/git/refs/{}", self.url(), refname);
         client
             .json(client.patch(&url).json(&serde_json::json!({
@@ -1239,8 +1241,7 @@ impl Repository {
                     "{} failed to update reference {refname} to {sha}",
                     self.full_name
                 )
-            })?;
-        Ok(())
+            })
     }
 
     /// Returns a list of recent commits on the given branch.
@@ -1485,16 +1486,66 @@ impl Repository {
     }
 
     /// Synchronize a branch (in a forked repository) by pulling in its upstream contents.
+    ///
+    /// **Warning**: This will to a force update if there are conflicts.
     pub async fn merge_upstream(&self, client: &GithubClient, branch: &str) -> anyhow::Result<()> {
         let url = format!("{}/merge-upstream", self.url());
-        client
+        let merge_error = match client
             .send_req(client.post(&url).json(&serde_json::json!({
                 "branch": branch,
             })))
             .await
+        {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                if e.downcast_ref::<reqwest::Error>().map_or(false, |e| {
+                    matches!(
+                        e.status(),
+                        Some(StatusCode::UNPROCESSABLE_ENTITY | StatusCode::CONFLICT)
+                    )
+                }) {
+                    e
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+        // 409 is a clear error that there is a merge conflict.
+        // However, I don't understand how/why 422 might happen. The docs don't really say.
+        // The gh cli falls back to trying to force a sync, so let's try that.
+        log::info!(
+            "{} failed to merge upstream branch {branch}, trying force sync: {merge_error:?}",
+            self.full_name
+        );
+        let parent = self.parent.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} failed to merge upstream branch {branch}, \
+                 force sync could not determine parent",
+                self.full_name
+            )
+        })?;
+        // Note: I'm not sure how to handle the case where the branch name
+        // differs to the upstream. For example, if I create a branch off
+        // master in my fork, somehow GitHub knows that my branch should push
+        // to upstream/master (not upstream/my-branch-name). I can't find a
+        // way to find that branch name. Perhaps GitHub assumes it is the
+        // default branch if there is no matching branch name?
+        let branch_ref = format!("heads/{branch}");
+        let latest_parent_commit = parent
+            .get_reference(client, &branch_ref)
+            .await
             .with_context(|| {
                 format!(
-                    "{} failed to merge upstream branch {branch}",
+                    "failed to get head branch {branch} when merging upstream to {}",
+                    self.full_name
+                )
+            })?;
+        let sha = latest_parent_commit.object.sha;
+        self.update_reference(client, &branch_ref, &sha)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to force update {branch} to {sha} for {}",
                     self.full_name
                 )
             })?;
@@ -1884,7 +1935,7 @@ impl GithubClient {
             Ok(res) => res.is_empty(),
             Err(e) => {
                 log::warn!(
-                    "failed to search for user commits in {} for author {author}: {e}",
+                    "failed to search for user commits in {} for author {author}: {e:?}",
                     repo.full_name
                 );
                 false
@@ -2116,23 +2167,23 @@ impl IssuesQuery for LeastRecentlyReviewedPullRequests {
 async fn project_items_by_status(
     client: &GithubClient,
     status_filter: impl Fn(Option<&str>) -> bool,
-) -> anyhow::Result<Vec<github_graphql::project_items_by_status::ProjectV2ItemContent>> {
+) -> anyhow::Result<Vec<github_graphql::project_items::ProjectV2Item>> {
     use cynic::QueryBuilder;
-    use github_graphql::project_items_by_status;
+    use github_graphql::project_items;
 
     const DESIGN_MEETING_PROJECT: i32 = 31;
-    let mut args = project_items_by_status::Arguments {
+    let mut args = project_items::Arguments {
         project_number: DESIGN_MEETING_PROJECT,
         after: None,
     };
 
     let mut all_items = vec![];
     loop {
-        let query = project_items_by_status::Query::build(args.clone());
+        let query = project_items::Query::build(args.clone());
         let req = client.post(Repository::GITHUB_GRAPHQL_API_URL);
         let req = req.json(&query);
 
-        let data: cynic::GraphQlResponse<project_items_by_status::Query> = client.json(req).await?;
+        let data: cynic::GraphQlResponse<project_items::Query> = client.json(req).await?;
         if let Some(errors) = data.errors {
             anyhow::bail!("There were graphql errors. {:?}", errors);
         }
@@ -2149,14 +2200,7 @@ async fn project_items_by_status(
             .ok_or_else(|| anyhow!("Malformed response."))?
             .into_iter()
             .flatten()
-            .filter(|item| {
-                status_filter(
-                    item.field_value_by_name
-                        .as_ref()
-                        .and_then(|status| status.as_str()),
-                )
-            })
-            .flat_map(|item| item.content);
+            .filter(|item| status_filter(item.status()));
         all_items.extend(filtered);
 
         let page_info = items.page_info;
@@ -2166,26 +2210,49 @@ async fn project_items_by_status(
         args.after = page_info.end_cursor;
     }
 
+    all_items.sort_by_key(|item| item.date());
     Ok(all_items)
 }
 
-pub struct ProposedDesignMeetings;
+pub enum DesignMeetingStatus {
+    Proposed,
+    Scheduled,
+    Done,
+    Empty,
+}
+
+impl DesignMeetingStatus {
+    fn query_str(&self) -> Option<&str> {
+        match self {
+            DesignMeetingStatus::Proposed => Some("Needs triage"),
+            DesignMeetingStatus::Scheduled => Some("Scheduled"),
+            DesignMeetingStatus::Done => Some("Done"),
+            DesignMeetingStatus::Empty => None,
+        }
+    }
+}
+
+pub struct DesignMeetings {
+    pub with_status: DesignMeetingStatus,
+}
+
 #[async_trait]
-impl IssuesQuery for ProposedDesignMeetings {
+impl IssuesQuery for DesignMeetings {
     async fn query<'a>(
         &'a self,
         _repo: &'a Repository,
         _include_fcp_details: bool,
         client: &'a GithubClient,
     ) -> anyhow::Result<Vec<crate::actions::IssueDecorator>> {
-        use github_graphql::project_items_by_status::ProjectV2ItemContent;
+        use github_graphql::project_items::ProjectV2ItemContent;
 
         let items =
-            project_items_by_status(client, |status| status == Some("Needs triage")).await?;
+            project_items_by_status(client, |status| status == self.with_status.query_str())
+                .await?;
         Ok(items
             .into_iter()
-            .flat_map(|item| match item {
-                ProjectV2ItemContent::Issue(issue) => Some(crate::actions::IssueDecorator {
+            .flat_map(|item| match item.content {
+                Some(ProjectV2ItemContent::Issue(issue)) => Some(crate::actions::IssueDecorator {
                     assignees: String::new(),
                     number: issue.number.try_into().unwrap(),
                     fcp_details: None,
