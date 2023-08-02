@@ -20,7 +20,7 @@
 use crate::{
     config::AssignConfig,
     github::{self, Event, Issue, IssuesAction, Selection},
-    handlers::review_prefs::{get_reviewer_prefs_by_capacity, get_reviewer_prefs_by_nick},
+    handlers::review_prefs::{get_review_candidate_by_capacity, get_review_candidates_by_username},
     handlers::{Context, GithubClient, IssuesEvent},
     interactions::EditIssueBody,
     ReviewCapacityUser,
@@ -454,7 +454,7 @@ pub(super) async fn handle_command(
                 return Ok(());
             }
             AssignCommand::ReviewName { name } => {
-                log::debug!(">>> ReviewName {:?}", name);
+                log::debug!("AssignCommand::ReviewName {}", name);
                 if config.owners.is_empty() {
                     // To avoid conflicts with the highfive bot while transitioning,
                     // r? is ignored if `owners` is not configured in triagebot.toml.
@@ -487,6 +487,8 @@ pub(super) async fn handle_command(
                 }
             }
         };
+        // NOTE: this will not handle PR assignment requested from the web Github UI
+        // that case is handled in the review_prefs module
         log::debug!("PR assignee is now {}", username);
         set_assignee(issue, &ctx.github, &username).await;
         // This PR will be registered in the reviewer's work queue using a `IssuesAction::Assigned`
@@ -643,12 +645,28 @@ async fn find_reviewer_from_names(
     names: &[String],
 ) -> Result<ReviewCapacityUser, FindReviewerError> {
     let mut candidates = candidate_reviewers_from_names(teams, config, issue, names)?;
+    let candidates = candidates
+        .drain()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
     let assignee = if candidates.len() > 1 {
-        get_reviewer_prefs_by_capacity(&db_client).await.unwrap()
+        // Select the best candidate from the pool
+        match get_review_candidate_by_capacity(&db_client, candidates.clone()).await {
+            Ok(reviewers) => reviewers,
+            Err(_) => {
+                return Err(FindReviewerError::NoReviewer { initial: vec![] });
+            }
+        }
     } else {
-        get_reviewer_prefs_by_nick(&db_client, &candidates.drain().collect::<Vec<&str>>()[0])
-            .await
-            .unwrap()
+        // Get the prefs of the only candidate identified
+        match get_review_candidates_by_username(&db_client, candidates.clone()).await {
+            Ok(mut reviewers) => reviewers.pop().unwrap(),
+            Err(_) => {
+                return Err(FindReviewerError::NoReviewer {
+                    initial: candidates,
+                });
+            }
+        }
     };
     Ok(assignee)
 }

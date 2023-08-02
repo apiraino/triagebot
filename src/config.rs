@@ -417,6 +417,7 @@ mod tests {
                 review_submitted: None,
                 mentions: None,
                 no_merges: None,
+                review_prefs: None
             }
         );
     }

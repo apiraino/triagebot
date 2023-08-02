@@ -281,6 +281,15 @@ pub struct ReviewCapacityUser {
     pub publish_prefs: bool,
 }
 
+impl ReviewCapacityUser {
+    pub(crate) fn is_available(&self) -> bool {
+        let today = chrono::Utc::today().naive_utc();
+        let is_available = (self.pto_date_end.is_some() && self.pto_date_start.is_some())
+            && (self.pto_date_end.unwrap() < today || self.pto_date_start.unwrap() > today);
+        self.active && is_available
+    }
+}
+
 impl From<HashMap<String, String>> for ReviewCapacityUser {
     fn from(obj: HashMap<String, String>) -> Self {
         // Note: if user set themselves as inactive all other prefs will be ignored

@@ -1,6 +1,6 @@
 use crate::{
     config::ReviewPrefsConfig,
-    github::{IssuesAction, IssuesEvent},
+    github::{IssuesAction, IssuesEvent, Selection},
     handlers::Context,
     ReviewCapacityUser,
 };
@@ -9,9 +9,9 @@ use tokio_postgres::Client as DbClient;
 use tracing as log;
 
 // This module updates the PR work queue of reviewers
-// - Increment by 1 the work queue of the user when a PR is assigned
-// - Decrement by 1 the work queue of the user when a PR is unassigned or closed
-// - Else?
+// - Adds the PR to the work queue of the user (when the PR has been assigned)
+// - Removes the PR from the work queue of the user (when the PR is unassigned or closed)
+// - Rollbacks the PR assignment in case the specific user ("r? user") is inactive/not available
 
 pub async fn set_prefs(
     db: &DbClient,
@@ -74,37 +74,68 @@ ORDER BY case when username='{}' then 1 else 2 end, username;",
         .collect()
 }
 
-pub async fn get_reviewer_prefs_by_nick(
+pub async fn get_review_candidates_by_username(
     db: &DbClient,
-    gh_nick: &str,
+    usernames: Vec<String>,
+) -> anyhow::Result<Vec<ReviewCapacityUser>> {
+    let q = format!(
+        "
+SELECT u.username, r.*
+FROM review_capacity r
+JOIN users u on u.user_id=r.user_id
+WHERE username = ANY('{{ {} }}')",
+        usernames.join(",")
+    );
+
+    log::debug!("get review prefs for {:?}", usernames);
+    let rows = db.query(&q, &[]).await.unwrap();
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| Some(ReviewCapacityUser::from(row)))
+        .collect())
+}
+
+pub async fn get_review_candidate_by_capacity(
+    db: &DbClient,
+    usernames: Vec<String>,
 ) -> anyhow::Result<ReviewCapacityUser> {
     let q = format!(
         "
-SELECT username, r.*
-FROM review_capacity r
-JOIN users on users.user_id=r.user_id
-AND username='{}'",
-        gh_nick
-    );
-    log::debug!("get reviewer by nick {:?}", gh_nick);
-    let rec = db.query_one(&q, &[]).await.context("Select DB error")?;
-    Ok(rec.into())
-}
-
-pub async fn get_reviewer_prefs_by_capacity(db: &DbClient) -> anyhow::Result<ReviewCapacityUser> {
-    let q = "
 SELECT username, r.*, sum(r.max_assigned_prs - r.num_assigned_prs) as avail_slots
 FROM review_capacity r
 JOIN users on users.user_id=r.user_id
 WHERE active = true
 AND current_date NOT BETWEEN pto_date_start AND pto_date_end
+AND username = ANY('{{ {} }}')
 AND num_assigned_prs < max_assigned_prs
 GROUP BY username, r.id
 ORDER BY avail_slots DESC
-LIMIT 1";
+LIMIT 1",
+        usernames.join(",")
+    );
     log::debug!("get reviewers by capacity");
-    let rec = db.query_one(q, &[]).await.context("Select DB error")?;
+    let rec = db.query_one(&q, &[]).await.context("Select DB error")?;
     Ok(rec.into())
+}
+
+async fn get_review_pr_assignees(
+    db: &DbClient,
+    issue_num: u64,
+) -> anyhow::Result<Vec<ReviewCapacityUser>> {
+    let q = format!(
+        "
+SELECT u.username, r.*
+FROM review_capacity r
+JOIN users u on u.user_id=r.user_id
+WHERE {} = ANY (assigned_prs);",
+        issue_num,
+    );
+
+    let rows = db.query(&q, &[]).await.unwrap();
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| Some(ReviewCapacityUser::from(row)))
+        .collect())
 }
 
 pub(super) struct ReviewPrefsInput {}
@@ -126,11 +157,11 @@ pub(super) async fn parse_input(
     );
     match event.action {
         IssuesAction::Assigned => {
-            log::debug!("[review_prefs] PR assigned: Will add to work queue");
+            log::debug!("[review_prefs] IssuesAction::Assigned: Will add to work queue");
             Ok(Some(ReviewPrefsInput {}))
         }
         IssuesAction::Unassigned | IssuesAction::Closed => {
-            log::debug!("[review_prefs] PR unassigned: Will remove from work queue");
+            log::debug!("[review_prefs] IssuesAction::Unassigned | IssuesAction::Closed: Will remove from work queue");
             Ok(Some(ReviewPrefsInput {}))
         }
         _ => {
@@ -140,10 +171,10 @@ pub(super) async fn parse_input(
     }
 }
 
-pub async fn update_assigned_prs(
+async fn update_assigned_prs(
     db: &DbClient,
     user_id: i64,
-    assigned_prs: Vec<i32>,
+    assigned_prs: &Vec<i32>,
 ) -> anyhow::Result<ReviewCapacityUser> {
     let q = "
 UPDATE review_capacity r
@@ -153,7 +184,7 @@ WHERE r.user_id=$1 AND u.user_id=r.user_id
 RETURNING u.username, r.*";
     let num_assigned_prs = assigned_prs.len() as i32;
     let rec = db
-        .query_one(q, &[&user_id, &assigned_prs, &num_assigned_prs])
+        .query_one(q, &[&user_id, assigned_prs, &num_assigned_prs])
         .await
         .context("Update DB error")?;
     Ok(rec.into())
@@ -168,35 +199,87 @@ pub(super) async fn handle_input<'a>(
     log::debug!("[review_prefs] handle_input");
     let db_client = ctx.db.get().await;
 
-    if event.issue.user.login.is_empty() {
-        todo!("When unassigning a PR, we don't receive the assignee that is removed so we don't know who was unassigned this PR");
+    // Note:
+    // When assigning or unassigning a PR, we don't receive the assignee(s) removed from the PR
+    // so we need to run two queries:
+
+    // 1) unassign this PR from everyone
+    let current_assignees = get_review_pr_assignees(&db_client, event.issue.number)
+        .await
+        .unwrap();
+    for mut rec in current_assignees {
+        if let Some(index) = rec
+            .assigned_prs
+            .iter()
+            .position(|value| *value == event.issue.number as i32)
+        {
+            rec.assigned_prs.swap_remove(index);
+        }
+        update_assigned_prs(&db_client, rec.user_id, &rec.assigned_prs)
+            .await
+            .unwrap();
     }
 
-    let mut prefs = get_reviewer_prefs_by_nick(&db_client, &event.issue.user.login)
+    // 2) assign the PR to the requested team members
+    let usernames = event
+        .issue
+        .assignees
+        .iter()
+        .map(|x| x.login.clone())
+        .collect::<Vec<String>>();
+    let requested_assignees = get_review_candidates_by_username(&db_client, usernames)
         .await
         .unwrap();
+    // iterate the list of requested assignees and try to assign the issue to each of them
+    // in case of failure, emit a comment (for each failure)
+    for mut assignee_prefs in requested_assignees {
+        log::debug!(
+            "Trying to assign to {}, with prefs {:?}",
+            &assignee_prefs.username,
+            &assignee_prefs
+        );
 
-    // either add or remove the PR from the list of assigned PRs for this user
-    match event.action {
-        IssuesAction::Assigned => prefs.assigned_prs.push(event.issue.number as i32),
-        IssuesAction::Unassigned | IssuesAction::Closed => {
-            let index = prefs
-                .assigned_prs
-                .iter()
-                .position(|x| *x == event.issue.number as i32)
-                .unwrap();
-            prefs.assigned_prs.swap_remove(index);
+        // If Github just assigned a PR to an inactive/unavailable user
+        // publish a comment notifying the error and rollback the PR assignment
+        // If the action is to unassign/close a PR, let the update happen anyway
+        if event.action == IssuesAction::Assigned
+            && (!assignee_prefs.active || !assignee_prefs.is_available())
+        {
+            log::debug!(
+                "PR assigned to {}, which is not available: will revert this.",
+                &assignee_prefs.username
+            );
+            event
+                .issue
+                .post_comment(
+                    &ctx.github,
+                    &format!(
+                        "Could not assign PR to user {}, please reroll for the team",
+                        &assignee_prefs.username
+                    ),
+                )
+                .await
+                .context("Failed posting a comment on Github")?;
+            event
+                .issue
+                .remove_assignees(&ctx.github, Selection::One(&assignee_prefs.username))
+                .await
+                .context("Failed unassigning the PR")?;
         }
-        _ => {
-            // unhandled action, do nothing
-            log::debug!("Unhandled action {:?}, bail out.", event.action);
-            return Ok(());
-        }
-    };
 
-    let _pref_updated = update_assigned_prs(&db_client, prefs.user_id, prefs.assigned_prs)
+        let iss_num = event.issue.number as i32;
+        if !assignee_prefs.assigned_prs.contains(&iss_num) {
+            assignee_prefs.assigned_prs.push(iss_num)
+        }
+
+        update_assigned_prs(
+            &db_client,
+            assignee_prefs.user_id,
+            &assignee_prefs.assigned_prs,
+        )
         .await
         .unwrap();
+    }
 
     Ok(())
 }
