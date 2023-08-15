@@ -61,7 +61,7 @@ const RETURNING_USER_WELCOME_MESSAGE: &str = "r? @{assignee}
 (rustbot has picked a reviewer for you, use r? to override)";
 
 const RETURNING_USER_WELCOME_MESSAGE_NO_REVIEWER: &str =
-    "@{author}: no appropriate reviewer found, use r? to override";
+    "@{author}: no appropriate reviewer found, use `r?` to override";
 
 const NON_DEFAULT_BRANCH: &str =
     "Pull requests are usually filed against the {default} branch for this repo, \
@@ -610,7 +610,7 @@ impl fmt::Display for FindReviewerError {
                     f,
                     "No reviewers could be found from initial request `{}`\n\
                      This repo may be misconfigured.\n\
-                     Use r? to specify someone else to assign.",
+                     Use `r?` to specify someone else to assign.",
                     initial.join(",")
                 )
             }
@@ -620,7 +620,7 @@ impl fmt::Display for FindReviewerError {
                     "Could not assign reviewer from: `{}`.\n\
                      User(s) `{}` are either the PR author or are already assigned, \
                      and there are no other candidates.\n\
-                     Use r? to specify someone else to assign.",
+                     Use `r?` to specify someone else to assign.",
                     initial.join(","),
                     filtered.join(","),
                 )
@@ -654,13 +654,24 @@ async fn find_reviewer_from_names(
         match get_review_candidate_by_capacity(&db_client, candidates.clone()).await {
             Ok(reviewers) => reviewers,
             Err(_) => {
-                return Err(FindReviewerError::NoReviewer { initial: vec![] });
+                return Err(FindReviewerError::NoReviewer {
+                    initial: candidates,
+                });
             }
         }
     } else {
         // Get the prefs of the only candidate identified
         match get_review_candidates_by_username(&db_client, candidates.clone()).await {
-            Ok(mut reviewers) => reviewers.pop().unwrap(),
+            Ok(mut reviewers) => {
+                if reviewers.is_empty() {
+                    return Err(FindReviewerError::NoReviewer {
+                        initial: candidates,
+                    });
+                }
+                reviewers
+                    .pop()
+                    .expect("Something wrong happened when getting the reviewer")
+            }
             Err(_) => {
                 return Err(FindReviewerError::NoReviewer {
                     initial: candidates,
