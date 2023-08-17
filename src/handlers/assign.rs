@@ -664,18 +664,14 @@ async fn find_reviewer_from_names(
         match get_review_candidates_by_username(&db_client, candidates.clone()).await {
             Ok(mut reviewers) => {
                 if reviewers.is_empty() {
-                    return Err(FindReviewerError::NoReviewer {
-                        initial: candidates,
-                    });
+                    return Err(FindReviewerError::NoReviewer { initial: vec![] });
                 }
                 reviewers
                     .pop()
                     .expect("Something wrong happened when getting the reviewer")
             }
             Err(_) => {
-                return Err(FindReviewerError::NoReviewer {
-                    initial: candidates,
-                });
+                return Err(FindReviewerError::NoReviewer { initial: vec![] });
             }
         }
     };

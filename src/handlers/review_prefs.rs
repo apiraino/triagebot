@@ -113,7 +113,6 @@ ORDER BY avail_slots DESC
 LIMIT 1",
         usernames.join(",")
     );
-    log::debug!("get reviewers by capacity");
     let rec = db.query_one(&q, &[]).await.context("Select DB error")?;
     Ok(rec.into())
 }
@@ -220,6 +219,11 @@ pub(super) async fn handle_input<'a>(
             .unwrap();
     }
 
+    // If the action is to unassign/close a PR, nothing else to do
+    if event.action == IssuesAction::Closed || event.action == IssuesAction::Unassigned {
+        return Ok(());
+    }
+
     // 2) assign the PR to the requested team members
     let usernames = event
         .issue
@@ -241,7 +245,6 @@ pub(super) async fn handle_input<'a>(
 
         // If Github just assigned a PR to an inactive/unavailable user
         // publish a comment notifying the error and rollback the PR assignment
-        // If the action is to unassign/close a PR, let the update happen anyway
         if event.action == IssuesAction::Assigned
             && (!assignee_prefs.active || !assignee_prefs.is_available())
         {

@@ -1,28 +1,3 @@
-const url = "http://127.0.0.1:8000/review-settings";
-
-if (!window.fetch) {
-  postData = postDataLikeIts1992
-}
-
-function postDataLikeIts1992() {
-  const form = new URLSearchParams(new FormData(document.getElementById("review-capacity-form")));
-  var http = new XMLHttpRequest();
-  var params = '';
-  for (var i=0; i<form.length; i++) {
-    params = form[i] + '&=' + form[i];
-  }
-  http.open('POST', url, true);
-  http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-  http.onreadystatechange = function() {
-    if (http.readyState == 4 && http.status == 201) {
-      console.debug(http.responseText);
-      update_view(JSON.parse(http.responseText), "View updated", "success");
-    }
-  }
-  http.send(params);
-}
-
-
 async function update_view(content, msg, result_class) {
   var container = document.getElementById("message");
   container.innerHTML = msg;
@@ -85,11 +60,11 @@ async function update_view(content, msg, result_class) {
   other_prefs.insertAdjacentHTML('beforeend', other_rows);
 }
 
+const url = "http://127.0.0.1:8000/review-settings";
+
+// TODO: remove this once auth is implemented
 async function getData(user) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { "Role": user}
-  });
+  const response = await fetch(`${url}?user=${user}`);
   return response.json();
 }
 
@@ -99,6 +74,7 @@ async function postData() {
   const response = await fetch(url, {
     method: "POST",
     headers: {
+      // TODO: remove this once auth is implemented
       "Authorization": "Bearer XXX",
       "Content-Type": "application/x-www-form-urlencoded",
     },
@@ -132,10 +108,10 @@ function enableDisableFields(is_checked) {
 }
 
 // load initial data
-var isAdmin = false;
-if (document.location.href.includes('admin') === true) {
-  isAdmin = true;
-}
+// var isAdmin = false;
+// if (document.location.href.includes('admin') === true) {
+//   isAdmin = true;
+// }
 
 var u = document.location.search.split('=')[1];
 const user = u !== undefined ? u : 'pnkfelix';

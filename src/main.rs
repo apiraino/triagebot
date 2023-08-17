@@ -6,7 +6,7 @@ use futures::StreamExt;
 use hyper::{header, Body, Request, Response, Server, StatusCode};
 use reqwest::Client;
 use route_recognizer::Router;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{env, net::SocketAddr, sync::Arc};
 use tokio::io::AsyncReadExt;
@@ -64,6 +64,88 @@ fn validate_data(prefs: &ReviewCapacityUser) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct Token {
+    access_token: String,
+}
+
+async fn exchange_code(code: &str) -> anyhow::Result<Token> {
+    // let mut params = HashMap::new();
+    // params.insert("client_id", CLIENT_ID);
+    // params.insert("client_secret", CLIENT_SECRET);
+    // params.insert("code", code);
+
+    #[derive(Serialize, Debug)]
+    struct ReqToken<'a> {
+        client_id: &'a str,
+        client_secret: &'a str,
+        code: &'a str,
+    }
+
+    let client = reqwest::Client::new();
+
+    // let token = client
+    //     .post("https://github.com/login/oauth/access_token")
+    //     .form(&params)
+    //     .send()
+    //     .await
+    //     .unwrap()
+    //     .json::<Token>()
+    //     .await
+    //     .unwrap();
+
+    let client_id = std::env::var("CLIENT_ID").expect("CLIENT_ID is not set");
+    let client_secret = std::env::var("CLIENT_SECRET").expect("CLIENT_SECRET is not set");
+
+    let payload = ReqToken {
+        client_id: &client_id,
+        client_secret: &client_secret,
+        code,
+    };
+
+    let token = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<Token>()
+        .await
+        .unwrap();
+
+    log::debug!("Token received: {:?}", token);
+    Ok(token)
+}
+
+// TODO: move this to the github module
+async fn get_user(access_token: &str) -> anyhow::Result<github::User> {
+    let client = Client::new();
+    // let gh = github::GithubClient::new(client, access_token.to_string());
+    // let user = gh.get_profile().await?;
+    log::debug!("Getting user profile with token={}", access_token);
+
+    let mut headers = header::HeaderMap::new();
+    headers.insert("Accept", "application/vnd.github.v3+json".parse().unwrap());
+    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers.insert(
+        "User-Agent",
+        "anything-is-fine-just-send-this-header".parse().unwrap(),
+    );
+
+    let user = client
+        .get("https://api.github.com/user")
+        .bearer_auth(access_token)
+        .headers(headers)
+        .send()
+        .await
+        .unwrap()
+        .json::<github::User>()
+        .await
+        .unwrap();
+    Ok(user)
 }
 
 async fn serve_req(
@@ -188,7 +270,7 @@ async fn serve_req(
     }
     if req.uri.path() == "/review-settings" {
         // TODO:
-        // - Get auth token
+        // - Get auth token // HERE // !
         // - query Github for the user handle
         // - download the TOML file(s) and update the members team roster
 
@@ -197,7 +279,7 @@ async fn serve_req(
         // TODO: get these files from github
         get_string_from_file(&mut members, "static/compiler.toml").await;
         get_string_from_file(&mut members, "static/compiler-contributors.toml").await;
-        get_string_from_file(&mut members, "static/wg-prioritization.toml").await;
+        members.sort();
         log::debug!("Members loaded {:?}", members);
 
         let mut body = serde_json::json!({});
@@ -224,21 +306,41 @@ async fn serve_req(
             body = serde_json::json!(&review_capacity);
         }
 
+        let admins = vec!["pnkfelix", "apiraino"];
         if req.method == hyper::Method::GET {
-            // TODO: infer these from the authentication
-            let user = req
-                .headers
-                .get("Role")
-                .ok_or_else(|| header::HeaderValue::from_static(""))
-                .unwrap()
-                .to_str()
-                .unwrap_or("pnkfelix");
-            let is_admin = user == "pnkfelix";
-            log::debug!("user={}, is admin: {}", user, is_admin);
-
-            // query the DB, pull all users that are members in the TOML file
-            let review_capacity = get_prefs(&db_client, &mut members, user, is_admin).await;
-            body = serde_json::json!(&review_capacity);
+            if let Some(query) = req.uri.query() {
+                let code = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "code");
+                if let Some((_, code)) = code {
+                    log::debug!("Successfully authorized! Got code {}", code);
+                    // generate a token to impersonate the user
+                    let token = exchange_code(&code).await.unwrap();
+                    // get GH username
+                    let user = get_user(&token.access_token).await.unwrap();
+                    // TODO: figure out if the user is admin or normal user
+                    // let user = req
+                    //     .headers
+                    //     .get("Role")
+                    //     .ok_or_else(|| header::HeaderValue::from_static(""))
+                    //     .unwrap()
+                    //     .to_str()
+                    //     .unwrap_or("pnkfelix");
+                    let is_admin = admins.contains(&user.login.as_str());
+                    log::debug!("user={}, is admin: {}", user.login, is_admin);
+                    // TODO: now set a cookie
+                    // query the DB, pull all users that are members in the TOML file
+                    let review_capacity =
+                        get_prefs(&db_client, &mut members, &user.login, is_admin).await;
+                    body = serde_json::json!(&review_capacity);
+                }
+                // XXX: only for the demo
+                let user = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "user");
+                if let Some((_, username)) = user {
+                    let is_admin = admins.contains(&username.as_ref());
+                    let review_capacity =
+                        get_prefs(&db_client, &mut members, &username, is_admin).await;
+                    body = serde_json::json!(&review_capacity);
+                }
+            }
         }
 
         return Ok(Response::builder()

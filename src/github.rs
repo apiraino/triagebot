@@ -167,6 +167,11 @@ impl GithubClient {
         let (body, _req_dbg) = self.send_req(req).await?;
         Ok(serde_json::from_slice(&body)?)
     }
+
+    // TODO
+    pub async fn get_profile(&self) -> anyhow::Result<User> {
+        todo!()
+    }
 }
 
 impl User {
