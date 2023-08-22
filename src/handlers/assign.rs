@@ -629,22 +629,48 @@ impl fmt::Display for FindReviewerError {
     }
 }
 
-/// Finds a reviewer to assign to a PR.
-/// Accounts for reviewer's capacity preferences.
-/// If just one candidate is available (or a specific reviewer is invoked), return that one.
-///
-/// The `names` is a list of candidate reviewers `r?`, such as `compiler` or
-/// `@octocat`, or names from the owners map. It can contain GitHub usernames,
-/// auto-assign groups, or rust-lang team names. It must have at least one
-/// entry.
-async fn find_reviewer_from_names(
+fn _old_find_reviewer_from_names(
+    _teams: &Teams,
+    _config: &AssignConfig,
+    _issue: &Issue,
+    _names: &[String],
+    candidates: HashSet<&str>,
+) -> Result<String, FindReviewerError> {
+    // This uses a relatively primitive random choice algorithm.
+    // GitHub's CODEOWNERS supports much more sophisticated options, such as:
+    //
+    // - Round robin: Chooses reviewers based on who's received the least
+    //   recent review request, focusing on alternating between all members of
+    //   the team regardless of the number of outstanding reviews they
+    //   currently have.
+    // - Load balance: Chooses reviewers based on each member's total number
+    //   of recent review requests and considers the number of outstanding
+    //   reviews for each member. The load balance algorithm tries to ensure
+    //   that each team member reviews an equal number of pull requests in any
+    //   30 day period.
+    //
+    // Additionally, with CODEOWNERS, users marked as "Busy" in the GitHub UI
+    // will not be selected for reviewer. There are several other options for
+    // configuring CODEOWNERS as well.
+    //
+    // These are all ideas for improving the selection here. However, I'm not
+    // sure they are really worth the effort.
+    use rand::prelude::IteratorRandom;
+    Ok(candidates
+        .into_iter()
+        .choose(&mut rand::thread_rng())
+        .expect("candidate_reviewers_from_names always returns at least one entry")
+        .to_string())
+}
+
+async fn _new_find_reviewer_from_names(
+    _teams: &Teams,
+    _config: &AssignConfig,
+    _issue: &Issue,
+    _names: &[String],
     db_client: &DbClient,
-    teams: &Teams,
-    config: &AssignConfig,
-    issue: &Issue,
-    names: &[String],
+    candidates: &mut HashSet<&str>,
 ) -> Result<ReviewCapacityUser, FindReviewerError> {
-    let mut candidates = candidate_reviewers_from_names(teams, config, issue, names)?;
     let candidates = candidates
         .drain()
         .map(|x| x.to_string())
@@ -676,6 +702,35 @@ async fn find_reviewer_from_names(
         }
     };
     Ok(assignee)
+}
+
+/// Finds a reviewer to assign to a PR.
+/// Accounts for reviewer's capacity preferences.
+/// If just one candidate is available (or a specific reviewer is invoked), return that one.
+///
+/// The `names` is a list of candidate reviewers `r?`, such as `compiler` or
+/// `@octocat`, or names from the owners map. It can contain GitHub usernames,
+/// auto-assign groups, or rust-lang team names. It must have at least one
+/// entry.
+async fn find_reviewer_from_names(
+    db_client: &DbClient,
+    teams: &Teams,
+    config: &AssignConfig,
+    issue: &Issue,
+    names: &[String],
+) -> Result<ReviewCapacityUser, FindReviewerError> {
+    let mut candidates = candidate_reviewers_from_names(teams, config, issue, names)?;
+    let assignee: Result<ReviewCapacityUser, FindReviewerError>;
+    let use_new_assignment = std::env::var("USE_NEW_PR_ASSIGNMENT").is_ok();
+    if use_new_assignment {
+        assignee =
+            _new_find_reviewer_from_names(teams, config, issue, names, db_client, &mut candidates)
+                .await;
+    } else {
+        let username = _old_find_reviewer_from_names(teams, config, issue, names, candidates);
+        assignee = Ok(ReviewCapacityUser::phony(username.unwrap()));
+    }
+    assignee
 }
 
 fn candidate_reviewers_from_names<'a>(

@@ -288,6 +288,23 @@ impl ReviewCapacityUser {
             && (self.pto_date_end.unwrap() < today || self.pto_date_start.unwrap() > today);
         self.active && is_available
     }
+
+    // thin compat. layer, will be removed after stabilizing the new PR assignment
+    fn phony(username: String) -> Self {
+        Self {
+            username,
+            id: uuid::Uuid::new_v4(),
+            user_id: -1,
+            assigned_prs: vec![],
+            num_assigned_prs: None,
+            max_assigned_prs: None,
+            pto_date_start: None,
+            pto_date_end: None,
+            active: false,
+            allow_ping_after_days: None,
+            publish_prefs: false,
+        }
+    }
 }
 
 impl From<HashMap<String, String>> for ReviewCapacityUser {
