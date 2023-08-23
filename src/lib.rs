@@ -8,7 +8,7 @@ use crate::github::PullRequestDetails;
 use anyhow::Context;
 use handlers::HandlerError;
 use interactions::ErrorComment;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt};
 use tracing as log;
 
@@ -425,4 +425,15 @@ impl From<tokio_postgres::row::Row> for ReviewCapacityUser {
             publish_prefs: row.get("publish_prefs"),
         }
     }
+}
+
+// Used to deserialize .toml from GitHub
+#[derive(Deserialize)]
+struct Config {
+    people: People,
+}
+
+#[derive(Deserialize)]
+struct People {
+    members: Vec<String>,
 }

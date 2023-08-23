@@ -15,6 +15,8 @@ use std::{
 };
 use tracing as log;
 
+use crate::Config;
+
 #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct User {
     pub login: String,
@@ -171,6 +173,17 @@ impl GithubClient {
     // TODO
     pub async fn get_profile(&self) -> anyhow::Result<User> {
         todo!()
+    }
+
+    pub async fn get_team_members(&self, members: &mut Vec<String>, team: &str) {
+        let req = self.get(&format!(
+            "https://raw.githubusercontent.com/rust-lang/team/HEAD/teams/{}",
+            team,
+        ));
+        let (contents, _) = self.send_req(req).await.unwrap();
+        let body = String::from_utf8_lossy(&contents).to_string();
+        let mut config: Config = toml::from_str(&body).unwrap();
+        members.append(&mut config.people.members);
     }
 }
 

@@ -9,7 +9,6 @@ use route_recognizer::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{env, net::SocketAddr, sync::Arc};
-use tokio::io::AsyncReadExt;
 use tokio::{task, time};
 use tower::{Service, ServiceExt};
 use tracing as log;
@@ -32,29 +31,6 @@ async fn handle_agenda_request(req: String) -> anyhow::Result<String> {
     }
 
     anyhow::bail!("Unknown agenda; see /agenda for index.")
-}
-
-#[derive(Deserialize)]
-struct Config {
-    people: People,
-}
-
-#[derive(Deserialize)]
-struct People {
-    members: Vec<String>,
-}
-
-async fn get_string_from_file(dest: &mut Vec<String>, s: &str) {
-    let mut fd = tokio::fs::File::open(s)
-        .await
-        .unwrap_or_else(|err| panic!("Error opening file {}: {}", s, err));
-    let mut contents = String::new();
-    fd.read_to_string(&mut contents)
-        .await
-        .unwrap_or_else(|err| panic!("Error loading file {}: {}", s, err));
-    contents = contents.trim_end().to_string();
-    let mut config: Config = toml::from_str(&contents).unwrap();
-    dest.append(&mut config.people.members);
 }
 
 fn validate_data(prefs: &ReviewCapacityUser) -> anyhow::Result<()> {
@@ -274,11 +250,12 @@ async fn serve_req(
         // - query Github for the user handle
         // - download the TOML file(s) and update the members team roster
 
-        // parse the TOML file and load all [people.members]
+        // get team members from github
         let mut members = vec![];
-        // TODO: get these files from github
-        get_string_from_file(&mut members, "static/compiler.toml").await;
-        get_string_from_file(&mut members, "static/compiler-contributors.toml").await;
+        let gh = github::GithubClient::new_with_default_token(Client::new());
+        gh.get_team_members(&mut members, "compiler.toml").await;
+        gh.get_team_members(&mut members, "compiler-contributors.toml")
+            .await;
         members.sort();
         log::debug!("Members loaded {:?}", members);
 
