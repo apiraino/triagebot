@@ -252,9 +252,11 @@ async fn serve_req(
 
         // get team members from github
         let mut members = vec![];
+        let mut admins = vec!["apiraino".to_string()];
         let gh = github::GithubClient::new_with_default_token(Client::new());
-        gh.get_team_members(&mut members, "compiler.toml").await;
-        gh.get_team_members(&mut members, "compiler-contributors.toml")
+        gh.get_team_members(&mut admins, &mut members, "compiler.toml")
+            .await;
+        gh.get_team_members(&mut admins, &mut members, "compiler-contributors.toml")
             .await;
         members.sort();
         log::debug!("Members loaded {:?}", members);
@@ -283,7 +285,6 @@ async fn serve_req(
             body = serde_json::json!(&review_capacity);
         }
 
-        let admins = vec!["pnkfelix", "apiraino"];
         if req.method == hyper::Method::GET {
             if let Some(query) = req.uri.query() {
                 let code = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "code");
@@ -293,15 +294,7 @@ async fn serve_req(
                     let token = exchange_code(&code).await.unwrap();
                     // get GH username
                     let user = get_user(&token.access_token).await.unwrap();
-                    // TODO: figure out if the user is admin or normal user
-                    // let user = req
-                    //     .headers
-                    //     .get("Role")
-                    //     .ok_or_else(|| header::HeaderValue::from_static(""))
-                    //     .unwrap()
-                    //     .to_str()
-                    //     .unwrap_or("pnkfelix");
-                    let is_admin = admins.contains(&user.login.as_str());
+                    let is_admin = admins.contains(&user.login);
                     log::debug!("user={}, is admin: {}", user.login, is_admin);
                     // TODO: now set a cookie
                     // query the DB, pull all users that are members in the TOML file
@@ -312,7 +305,7 @@ async fn serve_req(
                 // XXX: only for the demo
                 let user = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "user");
                 if let Some((_, username)) = user {
-                    let is_admin = admins.contains(&username.as_ref());
+                    let is_admin = admins.contains(&username.as_ref().to_string());
                     let review_capacity =
                         get_prefs(&db_client, &mut members, &username, is_admin).await;
                     body = serde_json::json!(&review_capacity);

@@ -435,5 +435,6 @@ struct Config {
 
 #[derive(Deserialize)]
 struct People {
+    leads: Vec<String>,
     members: Vec<String>,
 }
