@@ -170,9 +170,9 @@ impl GithubClient {
         Ok(serde_json::from_slice(&body)?)
     }
 
-    // TODO
     pub async fn get_profile(&self) -> anyhow::Result<User> {
-        todo!()
+        self.json::<User>(self.client.get("https://api.github.com/user"))
+            .await
     }
 
     pub async fn get_team_members<'a>(

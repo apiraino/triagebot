@@ -96,32 +96,10 @@ async fn exchange_code(code: &str) -> anyhow::Result<Token> {
     Ok(token)
 }
 
-// TODO: move this to the github module
 async fn get_user(access_token: &str) -> anyhow::Result<github::User> {
     let client = Client::new();
-    // let gh = github::GithubClient::new(client, access_token.to_string());
-    // let user = gh.get_profile().await?;
-    log::debug!("Getting user profile with token={}", access_token);
-
-    let mut headers = header::HeaderMap::new();
-    headers.insert("Accept", "application/vnd.github.v3+json".parse().unwrap());
-    headers.insert("Content-Type", "application/json".parse().unwrap());
-    headers.insert(
-        "User-Agent",
-        "anything-is-fine-just-send-this-header".parse().unwrap(),
-    );
-
-    let user = client
-        .get("https://api.github.com/user")
-        .bearer_auth(access_token)
-        .headers(headers)
-        .send()
-        .await
-        .unwrap()
-        .json::<github::User>()
-        .await
-        .unwrap();
-    Ok(user)
+    let gh = github::GithubClient::new(client, access_token.to_string());
+    gh.get_profile().await
 }
 
 async fn serve_req(
@@ -289,7 +267,6 @@ async fn serve_req(
             if let Some(query) = req.uri.query() {
                 let code = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "code");
                 if let Some((_, code)) = code {
-                    log::debug!("Successfully authorized! Got code {}", code);
                     // generate a token to impersonate the user
                     let token = exchange_code(&code).await.unwrap();
                     // get GH username
