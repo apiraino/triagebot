@@ -270,6 +270,7 @@ const PREF_MAX_ASSIGNED_PRS: i32 = 5;
 pub struct ReviewCapacityUser {
     pub username: String,
     pub id: uuid::Uuid,
+    pub checksum: String,
     pub user_id: i64,
     pub assigned_prs: Vec<i32>,
     pub num_assigned_prs: Option<i32>,
@@ -295,6 +296,7 @@ impl ReviewCapacityUser {
             username,
             id: uuid::Uuid::new_v4(),
             user_id: -1,
+            checksum: String::new(),
             assigned_prs: vec![],
             num_assigned_prs: None,
             max_assigned_prs: None,
@@ -393,8 +395,11 @@ impl From<HashMap<String, String>> for ReviewCapacityUser {
         };
 
         let prefs = ReviewCapacityUser {
-            username: obj.get("username").unwrap().to_string(),
-            id: uuid::Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
+            // fields we don't receive from the web form (they are here ignored)
+            username: String::new(), // obj.get("username").unwrap().to_string(),
+            id: uuid::Uuid::new_v4(), // uuid::Uuid::parse_str(obj.get("id").unwrap()).unwrap(),
+            checksum: String::new(),
+            // fields received from the web form
             user_id: obj.get("user_id").unwrap().parse::<i64>().unwrap(),
             assigned_prs,
             num_assigned_prs,
@@ -414,6 +419,7 @@ impl From<tokio_postgres::row::Row> for ReviewCapacityUser {
         Self {
             username: row.get("username"),
             id: row.get("id"),
+            checksum: row.get("checksum"),
             user_id: row.get("user_id"),
             assigned_prs: row.get("assigned_prs"),
             num_assigned_prs: row.get("num_assigned_prs"),

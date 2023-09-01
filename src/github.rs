@@ -170,11 +170,6 @@ impl GithubClient {
         Ok(serde_json::from_slice(&body)?)
     }
 
-    pub async fn get_profile(&self) -> anyhow::Result<User> {
-        self.json::<User>(self.client.get("https://api.github.com/user"))
-            .await
-    }
-
     pub async fn get_team_members<'a>(
         &self,
         admins: &mut Vec<String>,
@@ -1975,6 +1970,18 @@ impl GithubClient {
         self.json(req)
             .await
             .with_context(|| format!("{} failed to get repo", full_name))
+    }
+
+    pub async fn get_profile(&self, access_token: &str) -> anyhow::Result<User> {
+        let c = self
+            .client
+            .get("https://api.github.com/user")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "rust-lang-triagebot");
+        log::debug!("client={:?}", c);
+        let resp = self.json::<User>(c).await;
+        log::debug!("resp={:?}", resp);
+        resp
     }
 }
 

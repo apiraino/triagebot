@@ -42,9 +42,23 @@ RETURNING u.username, r.*";
     Ok(rec.into())
 }
 
+/// Return a user
+pub async fn get_user(db_client: &DbClient, checksum: &str) -> anyhow::Result<ReviewCapacityUser> {
+    let q = "
+SELECT username,r.*
+FROM review_capacity r
+JOIN users on r.user_id=users.user_id
+WHERE r.checksum=$1";
+    let rec = db_client
+        .query_one(q, &[&checksum])
+        .await
+        .context("SQL error")?;
+    Ok(rec.into())
+}
+
 /// Get all review capacity preferences
-/// - me: sort this user at the top of the list
-/// - is_admin: pull also profiles marked as not public
+/// - me: sort the current user at the top of the list
+/// - is_admin: if `true` pull also profiles marked as not public
 pub async fn get_prefs(
     db: &DbClient,
     users: &mut Vec<String>,
@@ -53,9 +67,9 @@ pub async fn get_prefs(
 ) -> Vec<ReviewCapacityUser> {
     let q = format!(
         "
-SELECT username,review_capacity.*
-FROM review_capacity
-JOIN users on review_capacity.user_id=users.user_id
+SELECT username,r.*
+FROM review_capacity r
+JOIN users on r.user_id=users.user_id
 WHERE username = any($1)
 ORDER BY case when username='{}' then 1 else 2 end, username;",
         me
@@ -65,6 +79,7 @@ ORDER BY case when username='{}' then 1 else 2 end, username;",
     rows.into_iter()
         .filter_map(|row| {
             let rec = ReviewCapacityUser::from(row);
+            // FIXME: Hmm is this "username == me" showing all records al the time?
             if is_admin || rec.username == me || rec.publish_prefs == true {
                 Some(rec)
             } else {
