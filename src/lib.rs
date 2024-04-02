@@ -153,16 +153,6 @@ impl ReviewPrefs {
             self.username, prs, capacity
         )
     }
-
-    // The requested reviewer can take this PR if they have capacity
-    // or they didn't yet set one
-    fn has_capacity(&self) -> bool {
-        if let Some(capacity) = self.max_assigned_prs {
-            capacity as usize > self.assigned_prs.len()
-        } else {
-            true
-        }
-    }
 }
 
 impl From<tokio_postgres::row::Row> for ReviewPrefs {

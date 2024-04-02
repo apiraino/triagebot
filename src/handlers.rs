@@ -159,7 +159,7 @@ macro_rules! issue_handlers {
 
 // Handle events that happened on issues
 //
-// This is for events that happen only on issues (e.g. label changes).
+// This is for events that happen only on issues or pull requests (e.g. label changes or assignments).
 // Each module in the list must contain the functions `parse_input` and `handle_input`.
 issue_handlers! {
     assign,
