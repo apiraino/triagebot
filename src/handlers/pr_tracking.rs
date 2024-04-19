@@ -1,9 +1,10 @@
 //! This module updates the PR workqueue of the Rust project contributors
+//! Runs after a PR has been assigned or unassigned
 //!
 //! Purpose:
 //!
-//! - Adds the PR to the workqueue of one team member (when the PR has been assigned)
-//! - Removes the PR from the workqueue of one team member (when the PR is unassigned or closed)
+//! - Adds the PR to the workqueue of one team member (after the PR has been assigned)
+//! - Removes the PR from the workqueue of one team member (after the PR has been unassigned or closed)
 
 use crate::{
     config::ReviewPrefsConfig,
@@ -49,7 +50,7 @@ pub(super) async fn handle_input<'a>(
 ) -> anyhow::Result<()> {
     let db_client = ctx.db.get().await;
 
-    // extract the assignee matching the assignment or unassignment enum variants or return and ignore this handler
+    // extract the assignee or ignore this handler and return
     let IssuesEvent {
         action: IssuesAction::Assigned { assignee } | IssuesAction::Unassigned { assignee },
         ..
@@ -66,13 +67,16 @@ pub(super) async fn handle_input<'a>(
     if matches!(event.action, IssuesAction::Unassigned { .. }) {
         delete_pr_from_workqueue(&db_client, assignee.id.unwrap(), event.issue.number)
             .await
-            .context("Failed to remove PR from workqueue")?;
+            .context("Failed to remove PR from work queue")?;
     }
 
+    // This handler is reached also when assigning a PR using the Github UI
+    // (i.e. from the "Assignees" dropdown menu).
+    // We will need to check assignee availability here.
     if matches!(event.action, IssuesAction::Assigned { .. }) {
         upsert_pr_into_workqueue(&db_client, assignee.id.unwrap(), event.issue.number)
             .await
-            .context("Failed to add PR to workqueue")?;
+            .context("Failed to add PR to work queue")?;
     }
 
     Ok(())

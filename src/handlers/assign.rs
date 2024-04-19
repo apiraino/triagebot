@@ -7,6 +7,9 @@
 //! * `@rustbot release-assignment`: Removes the commenter's assignment.
 //! * `r? @user`: Assigns to the given user (PRs only).
 //!
+//! Note: this module does not handle review assignments issued from the
+//! GitHub "Assignees" dropdown menu
+//!
 //! This is capable of assigning to any user, even if they do not have write
 //! access to the repo. It does this by fake-assigning the bot and adding a
 //! "claimed by" section to the top-level comment.
@@ -535,7 +538,11 @@ pub(super) async fn handle_command(
                 }
             }
         };
+
+        // This user is validated and can accept the PR
         set_assignee(issue, &ctx.github, &username).await;
+        // This PR will now be registered in the reviewer's work queue
+        // by the `pr_tracking` handler
         return Ok(());
     }
 
@@ -593,6 +600,7 @@ pub(super) async fn handle_command(
 
     e.apply(&ctx.github, String::new(), &data).await?;
 
+    // Assign the PR: user's work queue has been checked and can accept this PR
     match issue.set_assignee(&ctx.github, &to_assign).await {
         Ok(()) => return Ok(()), // we are done
         Err(github::AssignmentError::InvalidAssignee) => {
@@ -661,9 +669,9 @@ impl fmt::Display for FindReviewerError {
                 write!(
                     f,
                     "Could not assign reviewer from: `{}`.\n\
-                     User(s) `{}` are either the PR author, already assigned, or on vacation, \
-                     and there are no other candidates.\n\
-                     Use `r?` to specify someone else to assign.",
+                     User(s) `{}` are either the PR author, already assigned, or on vacation. \
+                     If it's a team, we could not find any candidates.\n\
+                     Please use `r?` to specify someone else to assign.",
                     initial.join(","),
                     filtered.join(","),
                 )
@@ -705,14 +713,17 @@ async fn find_reviewer_from_names(
     //
     // These are all ideas for improving the selection here. However, I'm not
     // sure they are really worth the effort.
+
+    log::debug!("Filtered list of candidates: {:?}", candidates);
+
     Ok(candidates
         .into_iter()
         .choose(&mut rand::thread_rng())
-        .expect("candidate_reviewers_from_names always returns at least one entry")
+        .expect("Candidate filter should return at least one entry")
         .to_string())
 }
 
-/// Returns a list of candidate usernames to choose as a reviewer.
+/// Returns a list of candidate usernames (from relevant teams) to choose as a reviewer.
 fn candidate_reviewers_from_names<'a>(
     teams: &'a Teams,
     config: &'a AssignConfig,
