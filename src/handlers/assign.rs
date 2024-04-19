@@ -30,6 +30,7 @@ use rand::seq::IteratorRandom;
 use rust_team_data::v1::Teams;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use tokio_postgres::Client as DbClient;
 use tracing as log;
 
 #[cfg(test)]
@@ -282,13 +283,14 @@ async fn determine_assignee(
     config: &AssignConfig,
     diff: &[FileDiff],
 ) -> anyhow::Result<(Option<String>, bool)> {
+    let db_client = ctx.db.get().await;
     let teams = crate::team_data::teams(&ctx.github).await?;
     if let Some(name) = find_assign_command(ctx, event) {
         if is_self_assign(&name, &event.issue.user.login) {
             return Ok((Some(name.to_string()), true));
         }
         // User included `r?` in the opening PR body.
-        match find_reviewer_from_names(&teams, config, &event.issue, &[name]) {
+        match find_reviewer_from_names(&db_client, &teams, config, &event.issue, &[name]).await {
             Ok(assignee) => return Ok((Some(assignee), true)),
             Err(e) => {
                 event
@@ -302,7 +304,9 @@ async fn determine_assignee(
     // Errors fall-through to try fallback group.
     match find_reviewers_from_diff(config, diff) {
         Ok(candidates) if !candidates.is_empty() => {
-            match find_reviewer_from_names(&teams, config, &event.issue, &candidates) {
+            match find_reviewer_from_names(&db_client, &teams, config, &event.issue, &candidates)
+                .await
+            {
                 Ok(assignee) => return Ok((Some(assignee), false)),
                 Err(FindReviewerError::TeamNotFound(team)) => log::warn!(
                     "team {team} not found via diff from PR {}, \
@@ -330,7 +334,7 @@ async fn determine_assignee(
     }
 
     if let Some(fallback) = config.adhoc_groups.get("fallback") {
-        match find_reviewer_from_names(&teams, config, &event.issue, fallback) {
+        match find_reviewer_from_names(&db_client, &teams, config, &event.issue, fallback).await {
             Ok(assignee) => return Ok((Some(assignee), false)),
             Err(e) => {
                 log::trace!(
@@ -492,6 +496,7 @@ pub(super) async fn handle_command(
                     // welcome message).
                     return Ok(());
                 }
+                let db_client = ctx.db.get().await;
                 if is_self_assign(&name, &event.user().login) {
                     name.to_string()
                 } else {
@@ -512,8 +517,14 @@ pub(super) async fn handle_command(
                             }
                         }
                     }
-
-                    match find_reviewer_from_names(&teams, config, issue, &[team_name.to_string()])
+                    match find_reviewer_from_names(
+                        &db_client,
+                        &teams,
+                        config,
+                        issue,
+                        &[team_name.to_string()],
+                    )
+                    .await
                     {
                         Ok(assignee) => assignee,
                         Err(e) => {
@@ -667,7 +678,8 @@ impl fmt::Display for FindReviewerError {
 /// `@octocat`, or names from the owners map. It can contain GitHub usernames,
 /// auto-assign groups, or rust-lang team names. It must have at least one
 /// entry.
-fn find_reviewer_from_names(
+async fn find_reviewer_from_names(
+    _db: &DbClient,
     teams: &Teams,
     config: &AssignConfig,
     issue: &Issue,
