@@ -510,7 +510,7 @@ impl Issue {
         self.state == IssueState::Open
     }
 
-    pub async fn get_comment(&self, client: &GithubClient, id: i32) -> anyhow::Result<Comment> {
+    pub async fn get_comment(&self, client: &GithubClient, id: u32) -> anyhow::Result<Comment> {
         let comment_url = format!("{}/issues/comments/{}", self.repository().url(client), id);
         let comment = client.json(client.get(&comment_url)).await?;
         Ok(comment)
