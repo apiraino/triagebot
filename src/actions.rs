@@ -133,7 +133,12 @@ impl<'a> Action for Step<'a> {
                     let query = query.clone();
                     handles.push(tokio::task::spawn(async move {
                         let _permit = semaphore.acquire().await?;
-                        let fcps_groups = ["proposed_fcp", "in_pre_fcp", "in_fcp"];
+                        let fcps_groups = [
+                            "proposed_fcp",
+                            // XXX: emergency measure
+                            // "in_pre_fcp",
+                            // "in_fcp"
+                        ];
                         let mcps_groups = [
                             "mcp_new_not_seconded",
                             "mcp_old_not_seconded",

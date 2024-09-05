@@ -2070,6 +2070,8 @@ impl<'q> IssuesQuery for Query<'q> {
             .with_context(|| "Unable to get issues.")?;
 
         let fcp_map = if include_fcp_details {
+            // FIXME: This explodes when comment id overflows the i32
+            // Add a safeguard
             crate::rfcbot::get_all_fcps()
                 .await
                 .with_context(|| "Unable to get all fcps from rfcbot.")?
