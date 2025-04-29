@@ -50,6 +50,7 @@ pub(crate) struct Config {
     pub(crate) issue_links: Option<IssueLinksConfig>,
     pub(crate) no_mentions: Option<NoMentionsConfig>,
     pub(crate) behind_upstream: Option<BehindUpstreamConfig>,
+    pub(crate) backport: Option<BackportConfig>,
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
@@ -482,6 +483,15 @@ pub(crate) struct BehindUpstreamConfig {
     pub(crate) days_threshold: Option<usize>,
 }
 
+#[derive(PartialEq, Eq, Debug, serde::Deserialize)]
+pub(crate) struct BackportConfig {
+    /// Which labels must the issue have to trigger this handler
+    pub(crate) trigger_labels: Vec<String>,
+    /// Which labels will be added to the pull request closing the regression
+    #[serde(default)]
+    pub(crate) labels_to_add: Vec<String>,
+}
+
 fn get_cached_config(repo: &str) -> Option<Result<Arc<Config>, ConfigurationError>> {
     let cache = CONFIG_CACHE.read().unwrap();
     cache.get(repo).and_then(|(config, fetch_time)| {
@@ -679,6 +689,7 @@ mod tests {
                 behind_upstream: Some(BehindUpstreamConfig {
                     days_threshold: Some(14),
                 }),
+                backport: None
             }
         );
     }
@@ -752,6 +763,7 @@ mod tests {
                 behind_upstream: Some(BehindUpstreamConfig {
                     days_threshold: Some(7),
                 }),
+                backport: None
             }
         );
     }
