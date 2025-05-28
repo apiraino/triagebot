@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use tracing as log;
 
 pub(crate) static CONFIG_FILE_NAME: &str = "triagebot.toml";
-const REFRESH_EVERY: Duration = Duration::from_secs(2 * 60); // Every two minutes
+// XXX: remove me
+const REFRESH_EVERY: Duration = Duration::from_secs(1); // Every two minutes
 
 static CONFIG_CACHE: LazyLock<
     RwLock<HashMap<String, (Result<Arc<Config>, ConfigurationError>, Instant)>>,
@@ -47,6 +48,7 @@ pub(crate) struct Config {
     pub(crate) issue_links: Option<IssueLinksConfig>,
     pub(crate) no_mentions: Option<NoMentionsConfig>,
     pub(crate) behind_upstream: Option<BehindUpstreamConfig>,
+    pub(crate) backport: Option<BackportTeamConfig>,
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
@@ -440,7 +442,7 @@ pub(crate) async fn get(
         config
     } else {
         log::trace!("fetching fresh config for {}", repo.full_name);
-        let res = get_fresh_config(gh, repo).await;
+        let res = get_fresh_config_test(gh, repo).await;
         CONFIG_CACHE
             .write()
             .unwrap()
@@ -522,6 +524,24 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(PartialEq, Eq, Debug, serde::Deserialize)]
+pub(crate) struct BackportTeamConfig {
+    // team name -> labels
+    #[serde(flatten)]
+    pub(crate) configs: HashMap<String, BackportConfig>,
+}
+
+#[derive(Default, PartialEq, Eq, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct BackportConfig {
+    /// Prerequisite label(s) to trigger this handler (one of)
+    pub(crate) team_labels: Vec<String>,
+    /// Prerequisite labels for the issue to qualify as regression (all)
+    pub(crate) needs_labels: Vec<String>,
+    /// Labels to be added to the pull request closing the regression
+    pub(crate) add_labels: Vec<String>,
+}
+
 fn get_cached_config(repo: &str) -> Option<Result<Arc<Config>, ConfigurationError>> {
     let cache = CONFIG_CACHE.read().unwrap();
     cache.get(repo).and_then(|(config, fetch_time)| {
@@ -531,6 +551,22 @@ fn get_cached_config(repo: &str) -> Option<Result<Arc<Config>, ConfigurationErro
             None
         }
     })
+}
+
+// XXX: remove me
+async fn get_fresh_config_test(
+    _gh: &GithubClient,
+    repo: &Repository,
+) -> Result<Arc<Config>, ConfigurationError> {
+    let contents = reqwest::get("http://localhost:4000/triagebot.toml")
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let config = Arc::new(toml::from_str::<Config>(&contents).map_err(ConfigurationError::Toml)?);
+    log::debug!("fresh configuration for {}: {:?}", repo.full_name, config);
+    Ok(config)
 }
 
 async fn get_fresh_config(
@@ -727,6 +763,7 @@ mod tests {
                 concern: Some(ConcernConfig {
                     labels: vec!["has-concerns".to_string()],
                 }),
+                backport: None
             }
         );
     }
@@ -812,6 +849,7 @@ mod tests {
                 behind_upstream: Some(BehindUpstreamConfig {
                     days_threshold: Some(7),
                 }),
+                backport: None
             }
         );
     }

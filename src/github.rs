@@ -1887,6 +1887,7 @@ impl Repository {
             .await
     }
 
+    // XXX: why did I have to change this URL to have the issue retrieved?
     pub async fn get_issue(&self, client: &GithubClient, issue_num: u64) -> anyhow::Result<Issue> {
         let url = format!("{}/issues/{issue_num}", self.url(client));
         client
