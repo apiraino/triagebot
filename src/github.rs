@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, FixedOffset, Utc};
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use hyper::header::HeaderValue;
 use octocrab::models::{Author, AuthorAssociation};
 use regex::Regex;
@@ -1935,8 +1935,9 @@ impl Repository {
             .await
     }
 
+    // XXX: why did I have to change this URL to have the issue retrieved?
     pub async fn get_issue(&self, client: &GithubClient, issue_num: u64) -> anyhow::Result<Issue> {
-        let url = format!("{}/pulls/{issue_num}", self.url(client));
+        let url = format!("{}/issues/{issue_num}", self.url(client));
         client
             .json(client.get(&url))
             .await
@@ -2701,9 +2702,9 @@ impl GithubClient {
             .await
         {
             Ok(c) => {
-                if let Some(c) = c["data"]["repository"]["defaultBranchRef"]["target"]["history"]
-                    ["totalCount"]
-                    .as_i64()
+                if let Some(c) =
+                    c["data"]["repository"]["defaultBranchRef"]["target"]["history"]["totalCount"]
+                        .as_i64()
                 {
                     return c == 0;
                 }
