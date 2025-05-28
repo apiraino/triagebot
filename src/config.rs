@@ -50,6 +50,7 @@ pub(crate) struct Config {
     pub(crate) issue_links: Option<IssueLinksConfig>,
     pub(crate) no_mentions: Option<NoMentionsConfig>,
     pub(crate) behind_upstream: Option<BehindUpstreamConfig>,
+    pub(crate) backport: Option<BackportConfig>,
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
@@ -528,6 +529,17 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(PartialEq, Eq, Debug, serde::Deserialize)]
+pub(crate) struct BackportConfig {
+    /// Prerequisite label(s) to trigger this handler (one of)
+    pub(crate) team_labels: Vec<String>,
+    /// Prerequisite labels for the issue to qualify as regression (all)
+    pub(crate) needs_labels: Vec<String>,
+    /// Labels to be added to the pull request closing the regression
+    #[serde(default)]
+    pub(crate) labels_to_add: Vec<String>,
+}
+
 fn get_cached_config(repo: &str) -> Option<Result<Arc<Config>, ConfigurationError>> {
     let cache = CONFIG_CACHE.read().unwrap();
     cache.get(repo).and_then(|(config, fetch_time)| {
@@ -734,6 +746,7 @@ mod tests {
                 concern: Some(ConcernConfig {
                     labels: vec!["has-concerns".to_string()],
                 }),
+                backport: None
             }
         );
     }
@@ -820,6 +833,7 @@ mod tests {
                 behind_upstream: Some(BehindUpstreamConfig {
                     days_threshold: Some(7),
                 }),
+                backport: None
             }
         );
     }
