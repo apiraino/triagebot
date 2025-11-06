@@ -408,7 +408,7 @@ impl<'de> serde::Deserialize<'de> for NotifyZulipTablesConfig {
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct NotifyZulipLabelConfig {
+pub struct NotifyZulipLabelConfig {
     pub(crate) zulip_stream: u64,
     pub(crate) topic: String,
     #[serde(rename = "message_on_add", default, deserialize_with = "string_or_seq")]
@@ -433,6 +433,18 @@ pub(crate) struct NotifyZulipLabelConfig {
     pub(crate) messages_on_reopen: Vec<String>,
     #[serde(default)]
     pub(crate) required_labels: Vec<String>,
+}
+
+impl NotifyZulipConfig {
+    /// Given a [notify-zulip] config, return the specific [notify-zulip.A.B] config (if existing)
+    pub(crate) fn retrieve_subcfg(
+        &self,
+        backport_kind: &str,
+        backport_team: &str,
+    ) -> Option<&NotifyZulipLabelConfig> {
+        let cfg = self.labels.get(backport_kind)?;
+        Some(cfg.subtables.get(backport_team)?)
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]

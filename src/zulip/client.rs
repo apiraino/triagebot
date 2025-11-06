@@ -2,6 +2,7 @@ use crate::zulip::Recipient;
 use crate::zulip::api::{MessageApiResponse, ZulipUser, ZulipUsers};
 use anyhow::Context;
 use reqwest::{Client, Method, RequestBuilder, Response};
+use rust_team_data::v1::ZulipStream;
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use std::env;
@@ -165,6 +166,16 @@ impl ZulipClient {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn get_zulip_stream(&self, stream_id: u64) -> anyhow::Result<ZulipStream> {
+        let resp = self
+            .make_request(Method::GET, &format!("streams/{}", stream_id))
+            .send()
+            .await?;
+        deserialize_response::<ZulipStream>(resp)
+            .await
+            .map(|stream| stream)
     }
 
     fn make_request(&self, method: Method, url: &str) -> RequestBuilder {
