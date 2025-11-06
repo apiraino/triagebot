@@ -1,19 +1,22 @@
+//! Handles messages from our Zulip chat instance to the GitHub rust-lang/rust repository
+//!
 pub mod api;
 pub mod client;
 mod commands;
 
+use crate::config::NotifyZulipLabelConfig;
 use crate::db::notifications::add_metadata;
 use crate::db::notifications::{self, Identifier, delete_ping, move_indices, record_ping};
 use crate::db::review_prefs::{
     RotationMode, get_review_prefs, get_review_prefs_batch, upsert_review_prefs,
 };
-use crate::github::User;
+use crate::github::{Issue, User};
 use crate::handlers::Context;
 use crate::handlers::docs_update::docs_update;
 use crate::handlers::pr_tracking::get_assigned_prs;
 use crate::handlers::project_goals::{self, ping_project_goals_owners};
 use crate::interactions::ErrorComment;
-use crate::utils::pluralize;
+use crate::utils::{contains_any, pluralize};
 use crate::zulip::api::{MessageApiResponse, Recipient};
 use crate::zulip::client::ZulipClient;
 use crate::zulip::commands::{
@@ -27,7 +30,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::response::IntoResponse;
 use commands::BackportArgs;
 use itertools::Itertools;
-use octocrab::Octocrab;
+use regex::Regex;
 use rust_team_data::v1::{TeamKind, TeamMember};
 use secrecy::{ExposeSecret, SecretString};
 use std::cmp::Reverse;
@@ -352,7 +355,7 @@ async fn handle_command<'a>(
                 }
                 StreamCommand::DocsUpdate => trigger_docs_update(message_data, &ctx.zulip),
                 StreamCommand::Backport(args) => {
-                    accept_decline_backport(message_data, &ctx.octocrab, &ctx.zulip, &args).await
+                    accept_decline_backport(message_data, ctx, &args).await
                 }
             };
         }
@@ -362,11 +365,49 @@ async fn handle_command<'a>(
     }
 }
 
+/// Ensure all labels in an issue satisfy the requirements of the [notify-zulip] -> required-labels config
+/// Issue should have all the required labels and none of the unwanted ones
+pub fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bool {
+    let _issue_labels = issue
+        .labels()
+        .iter()
+        .map(|l| l.name.as_str())
+        .collect::<Vec<&str>>();
+
+    for req_label in &config.required_labels {
+        let pattern = match globset::Glob::new(req_label) {
+            Ok(pattern) => pattern,
+            Err(err) => {
+                log::error!("Invalid glob pattern: {err}");
+                continue;
+            }
+        };
+        // if pattern is negated ("!label"), ensure the issue has NOT that label
+        if req_label.starts_with('!') {
+            let negated_req_label = req_label.replace("!", "");
+            if contains_any(&_issue_labels, &[&negated_req_label]) {
+                dbg!(format!(
+                    "Returning false because issue #{0:?} has labels '{1:?}' containing '{negated_req_label}'",
+                    issue.number, _issue_labels
+                ));
+                return false;
+            }
+        } else {
+            let matcher = pattern.compile_matcher();
+            if !issue.labels().iter().any(|l| matcher.is_match(&l.name)) {
+                dbg!("returning false");
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 // TODO: shorter variant of this command (f.e. `backport accept` or even `accept`) that infers everything from the Message payload
 async fn accept_decline_backport(
     message_data: &Message,
-    octo_client: &Octocrab,
-    zulip_client: &ZulipClient,
+    ctx: Arc<Context>,
     args_data: &BackportArgs,
 ) -> anyhow::Result<Option<String>> {
     let message = message_data.clone();
@@ -374,10 +415,53 @@ async fn accept_decline_backport(
     let stream_id = message.stream_id.unwrap();
     let subject = message.subject.unwrap();
 
-    // Repository owner and name are hardcoded
-    // This command is only used in this repository
-    let repo_owner = "rust-lang";
-    let repo_name = "rust";
+    // Repository owner and name hardcoded, this command is only used in this repository
+    // for testing use another repo please :-)
+    // TODO: should these be env vars, to ease testing?
+    // let repo_owner = "rust-lang";
+    // let repo_name = "rust";
+    let repo_owner = "apiraino";
+    let repo_name = "test-triagebot";
+    let repo = ctx
+        .github
+        .repository(&format!("{repo_owner}/{repo_name}"))
+        .await
+        .context(format!("Failed to get git repo {repo_owner}/{repo_name}"))?;
+
+    let config = crate::config::get(&ctx.github, &repo)
+        .await
+        .context(format!(
+            "Failed to get triagebot config for {repo_owner}/{repo_name}"
+        ))?;
+
+    let notify_zulip_config = config
+        .notify_zulip
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Cannot retrieve triagebot notify_zulip config"))?;
+
+    // for example: "#123456: beta-nominated" -> "beta-nominated"
+    let backport_kind = subject
+        .split_whitespace()
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("Could not extract backport kind from {subject}"))?;
+
+    // for example: 245100 -> "compiler"
+    let backport_team = get_canonical_team_name_from_zulip_id(&ctx.zulip, stream_id).await?;
+    let cfg_nomination = notify_zulip_config
+        .retrieve_subcfg(backport_kind, &backport_team)
+        .with_context(|| {
+            anyhow::anyhow!("Error retrieving {backport_kind:?}.{backport_team} configuration")
+        })?;
+
+    let issue = repo
+        .get_issue(&ctx.github, args_data.pr_num)
+        .await
+        .with_context(|| anyhow::anyhow!("Error retrieving issue {}", args_data.pr_num))?;
+
+    if !has_all_required_labels(&issue, cfg_nomination) {
+        log::debug!("Discarding action, issue/pr doesn't match configuration");
+        return Ok(None);
+    }
 
     // TODO: factor out the Zulip "URL encoder" to make it practical to use
     let zulip_send_req = crate::zulip::MessageApiRequest {
@@ -389,8 +473,8 @@ async fn accept_decline_backport(
     };
 
     // NOTE: the Zulip Message API cannot yet pin exactly a single message so the link in the GitHub comment will be to the whole topic
-    // See: https://rust-lang.zulipchat.com/#narrow/channel/122653-zulip/topic/.22near.22.20parameter.20in.20payload.20of.20send.20message.20API
-    let zulip_link = zulip_send_req.url(zulip_client);
+    // See: https://github.com/zulip/zulip/issues/15327
+    let zulip_link = zulip_send_req.url(&ctx.zulip);
 
     let message_body = match args.verb {
         BackportVerbArgs::Accept
@@ -404,13 +488,28 @@ async fn accept_decline_backport(
         }
     };
 
-    let _ = octo_client
+    let _ = ctx
+        .octocrab
         .issues(repo_owner, repo_name)
         .create_comment(args.pr_num, &message_body)
         .await
         .with_context(|| anyhow::anyhow!("unable to post comment on #{}", args.pr_num))?;
 
     Ok(None)
+}
+
+// TODO: these mappings won't likely change: can we store them in some authoritative source? Maybe in team_data?
+async fn get_canonical_team_name_from_zulip_id(
+    zulip: &ZulipClient,
+    stream_id: u64,
+) -> anyhow::Result<String> {
+    let stream_name = zulip.get_zulip_stream(stream_id).await?.stream.name;
+    let re = Regex::new("t-(?P<team_name>.*)/.*").unwrap();
+    if let Some(caps) = re.captures(&stream_name) {
+        Ok(caps.name("team_name").unwrap().as_str().to_string())
+    } else {
+        Err(anyhow::Error::msg("Could not match any team name"))
+    }
 }
 
 async fn ping_goals_cmd(

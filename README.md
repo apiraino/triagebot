@@ -131,8 +131,7 @@ You need to sign up for a free account, and also deal with configuring the GitHu
 ### Zulip testing
 
 If you want a test Zulip instance, you can [register a free one](https://zulip.com/new/). To have your local triagebot talk to this Zulip instance you need to:
-- Configure a [webhook forwarding service](#configure-webhook-forwarding)
-- Create in your Zulip instance an outgoing webhook bot, binding it to the forwarding address created before.
+- Log in the Zulip instance as admin and configure a [webhook forwarding service](#configure-webhook-forwarding), bind it to the forwarding address created before.
 - Launch your local triagebot setting `ZULIP_WEBHOOK_SECRET` to the webhook bot `token` value (you get that as part of the Zulip bot configuration)
 - Set other Zulip env vars as needed (see example in `.env.sample`).
 

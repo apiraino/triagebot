@@ -1,9 +1,13 @@
+//! Handles messages sent to our Zulip chat instance.
+//!
+//! Configuration is done with the `[notify-zulip]` table.
+//!
 use crate::github::User;
 use crate::zulip::api::Recipient;
-use crate::zulip::render_zulip_username;
+use crate::zulip::{has_all_required_labels, render_zulip_username};
 use crate::{
     config::{NotifyZulipConfig, NotifyZulipLabelConfig, NotifyZulipTablesConfig},
-    github::{Issue, IssuesAction, IssuesEvent, Label},
+    github::{IssuesAction, IssuesEvent, Label},
     handlers::Context,
 };
 use futures::future::join_all;
@@ -78,7 +82,9 @@ fn parse_label_change_input(
     }
 
     if include_config_names.is_empty() {
-        // It seems that there is no match between this event and any notify-zulip config, ignore this event
+        log::debug!(
+            "Mismatch between triagebot config and PR/issue labels. Event will be ignored."
+        );
         return None;
     }
 
@@ -157,24 +163,6 @@ fn parse_open_close_reopen_input(
             }
         })
         .collect()
-}
-
-fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bool {
-    for req_label in &config.required_labels {
-        let pattern = match globset::Glob::new(req_label) {
-            Ok(pattern) => pattern,
-            Err(err) => {
-                log::error!("Invalid glob pattern: {err}");
-                continue;
-            }
-        };
-        let matcher = pattern.compile_matcher();
-        if !issue.labels().iter().any(|l| matcher.is_match(&l.name)) {
-            return false;
-        }
-    }
-
-    true
 }
 
 pub(super) async fn handle_input(
@@ -332,4 +320,81 @@ fn test_notification() {
         "Needs `I-{team}-nominated`?".to_string(),
     );
     assert!(msg.contains("Needs `I-{team}-nominated`?"), "{msg}");
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{Config, NotifyZulipLabelConfig};
+    use crate::tests::github::issue;
+    use crate::zulip::has_all_required_labels;
+
+    #[test]
+    fn test_required_labels_check() {
+        let config = r##"
+            required_labels = ["label", "label1"]
+            zulip_stream = 123456
+            topic = "some topic"
+        "##;
+        let zulip_config = toml::from_str::<NotifyZulipLabelConfig>(&config).unwrap();
+
+        let issue_1 = issue().labels(vec!["label", "label1"]).call();
+        assert_eq!(true, has_all_required_labels(&issue_1, &zulip_config));
+
+        // missing one required label
+        let issue_2 = issue().labels(vec!["label"]).call();
+        assert_eq!(false, has_all_required_labels(&issue_2, &zulip_config));
+    }
+
+    #[test]
+    fn test_required_labels_check_negate() {
+        let config = r##"
+            required_labels = ["label", "label1", "!unwanted-label"]
+            zulip_stream = 123456
+            topic = "some topic"
+        "##;
+        let zulip_config = toml::from_str::<NotifyZulipLabelConfig>(&config).unwrap();
+
+        let issue_1 = issue().labels(vec!["label", "label1", "label2"]).call();
+        assert_eq!(true, has_all_required_labels(&issue_1, &zulip_config));
+
+        // issue has one label too many ("unwanted-label")
+        let issue_2 = issue()
+            .labels(vec![
+                "label",
+                "label1",
+                "unwanted-label",
+                "anything-else-is-fine",
+            ])
+            .call();
+        assert_eq!(false, has_all_required_labels(&issue_2, &zulip_config));
+    }
+
+    #[test]
+    fn test_retrieve_specific_config() {
+        let config = r#"
+   [notify-zulip."beta-nominated".compiler]
+   required_labels = ["label", "label1", "!unwanted-label"]
+   zulip_stream = 123456
+   topic = "some topic"
+"#;
+        let zulip_cfg = toml::from_str::<Config>(&config)
+            .unwrap()
+            .notify_zulip
+            .unwrap();
+        let expected_zulip_cfg = r##"
+            required_labels = ["label", "label1", "!unwanted-label"]
+            zulip_stream = 123456
+            topic = "some topic"
+        "##;
+        let expected_zulip_cfg: NotifyZulipLabelConfig =
+            toml::from_str::<NotifyZulipLabelConfig>(&expected_zulip_cfg).unwrap();
+
+        assert_eq!(
+            Some(&expected_zulip_cfg),
+            zulip_cfg.retrieve_subcfg("beta-nominated", "compiler")
+        );
+        assert_eq!(None, zulip_cfg.retrieve_subcfg("beta-nominated", "cooks"));
+        assert_eq!(None, zulip_cfg.retrieve_subcfg("cooks", "beta-nominated"));
+        assert_eq!(None, zulip_cfg.retrieve_subcfg("hahaha", "whatevs"));
+    }
 }
