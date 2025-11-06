@@ -4,6 +4,7 @@ use anyhow::Context;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::OnceLock;
 
@@ -15,6 +16,18 @@ pub struct ZulipClient {
     // The token is loaded lazily, to avoid requiring the API token if Zulip APIs are not
     // actually accessed.
     bot_api_token: OnceLock<SecretString>,
+}
+
+// TODO: make it compact (one struct)
+#[derive(Serialize, Deserialize)]
+pub struct ZulipStream {
+    pub stream: Zstream,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Zstream {
+    pub name: String,
+    pub stream_id: u64,
 }
 
 impl ZulipClient {
@@ -165,6 +178,16 @@ impl ZulipClient {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn get_zulip_stream(&self, stream_id: u64) -> anyhow::Result<ZulipStream> {
+        let resp = self
+            .make_request(Method::GET, &format!("streams/{}", stream_id))
+            .send()
+            .await?;
+        deserialize_response::<ZulipStream>(resp)
+            .await
+            .map(|stream| stream)
     }
 
     fn make_request(&self, method: Method, url: &str) -> RequestBuilder {
