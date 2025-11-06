@@ -1,4 +1,9 @@
+//! Handles messages to our Zulip chat instance.
+//!
+//! Configuration is done with the `[notify-zulip]` table.
+//!
 use crate::github::User;
+use crate::handlers::backport::contains_any;
 use crate::zulip::api::Recipient;
 use crate::zulip::render_zulip_username;
 use crate::{
@@ -38,6 +43,13 @@ pub(super) async fn parse_input(
         return Ok(None);
     };
 
+    log::debug!(
+        "Entering notify_zulip parse_input: IssuesAction = {:?}, issue.is_pr() = {}, draft = {}",
+        event.action,
+        event.issue.is_pr(),
+        event.issue.draft
+    );
+
     match &event.action {
         IssuesAction::Labeled { label } | IssuesAction::Unlabeled { label: Some(label) } => {
             let applied_label = label.clone();
@@ -63,6 +75,8 @@ fn parse_label_change_input(
 ) -> Option<NotifyZulipInput> {
     let mut include_config_names: Vec<String> = vec![];
 
+    log::debug!("Entering notify_zulip parse_label_change_input",);
+
     for (name, label_config) in &config.subtables {
         if has_all_required_labels(&event.issue, label_config) {
             match event.action {
@@ -79,6 +93,9 @@ fn parse_label_change_input(
 
     if include_config_names.is_empty() {
         // It seems that there is no match between this event and any notify-zulip config, ignore this event
+        log::debug!(
+            "Mismatch between triagebot config and PR/issue labels. Event will be ignored."
+        );
         return None;
     }
 
@@ -159,7 +176,15 @@ fn parse_open_close_reopen_input(
         .collect()
 }
 
+/// Ensure all labels in an issue satisfy the requirements of the [notify-zulip] -> required-labels config
+/// Issue should have all the required labels and none of the unwanted ones
 fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bool {
+    let _issue_labels = issue
+        .labels()
+        .iter()
+        .map(|l| l.name.as_str())
+        .collect::<Vec<&str>>();
+
     for req_label in &config.required_labels {
         let pattern = match glob::Pattern::new(req_label) {
             Ok(pattern) => pattern,
@@ -168,8 +193,21 @@ fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bo
                 continue;
             }
         };
-        if !issue.labels().iter().any(|l| pattern.matches(&l.name)) {
-            return false;
+        // if pattern is negated ("!label"), ensure the issue has NOT that label
+        if pattern.as_str().starts_with('!') {
+            let negated_req_label = req_label.replace("!", "");
+            if contains_any(&_issue_labels, &[&negated_req_label]) {
+                eprintln!(
+                    "Returning false because '{0:?}' have '{negated_req_label}'",
+                    _issue_labels
+                );
+                return false;
+            }
+        } else {
+            if !issue.labels().iter().any(|l| pattern.matches(&l.name)) {
+                eprintln!("returning false");
+                return false;
+            }
         }
     }
 
@@ -184,6 +222,13 @@ pub(super) async fn handle_input(
 ) -> anyhow::Result<()> {
     for input in inputs {
         let tables_config = &config.labels[&input.label.name];
+
+        log::debug!(
+            "Entering notify_zulip handle_input: IssuesAction = {:?}, issue.is_pr() = {}, draft = {}",
+            event.action,
+            event.issue.is_pr(),
+            event.issue.draft
+        );
 
         // Get valid label configs
         let mut label_configs: Vec<&NotifyZulipLabelConfig> = vec![];
@@ -331,4 +376,52 @@ fn test_notification() {
         "Needs `I-{team}-nominated`?".to_string(),
     );
     assert!(msg.contains("Needs `I-{team}-nominated`?"), "{msg}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_all_required_labels;
+    use crate::config::NotifyZulipLabelConfig;
+    use crate::tests::github::issue;
+
+    #[test]
+    fn test_required_labels_check() {
+        let config = r##"
+            required_labels = ["label", "label1"]
+            zulip_stream = 123456
+            topic = "some topic"
+        "##;
+        let zulip_config = toml::from_str::<NotifyZulipLabelConfig>(&config).unwrap();
+
+        let issue_1 = issue().labels(vec!["label", "label1"]).call();
+        assert_eq!(true, has_all_required_labels(&issue_1, &zulip_config));
+
+        // missing one required label
+        let issue_2 = issue().labels(vec!["label"]).call();
+        assert_eq!(false, has_all_required_labels(&issue_2, &zulip_config));
+    }
+
+    #[test]
+    fn test_required_labels_check_negate() {
+        let config = r##"
+            required_labels = ["label", "label1", "!unwanted-label"]
+            zulip_stream = 123456
+            topic = "some topic"
+        "##;
+        let zulip_config = toml::from_str::<NotifyZulipLabelConfig>(&config).unwrap();
+
+        let issue_1 = issue().labels(vec!["label", "label1", "label2"]).call();
+        assert_eq!(true, has_all_required_labels(&issue_1, &zulip_config));
+
+        // issue has one label too many ("unwanted-label")
+        let issue_2 = issue()
+            .labels(vec![
+                "label",
+                "label1",
+                "unwanted-label",
+                "anything-else-is-fine",
+            ])
+            .call();
+        assert_eq!(false, has_all_required_labels(&issue_2, &zulip_config));
+    }
 }
