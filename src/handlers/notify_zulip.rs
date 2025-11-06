@@ -1,3 +1,7 @@
+//! Handles messages to our Zulip chat instance.
+//!
+//! Configuration is done with the `[notify-zulip]` table.
+//!
 use crate::github::User;
 use crate::zulip::api::Recipient;
 use crate::zulip::render_zulip_username;
@@ -38,6 +42,13 @@ pub(super) async fn parse_input(
         return Ok(None);
     };
 
+    log::debug!(
+        "Entering notify_zulip parse_input: IssuesAction = {:?}, issue.is_pr() = {}, draft = {}",
+        event.action,
+        event.issue.is_pr(),
+        event.issue.draft
+    );
+
     match &event.action {
         IssuesAction::Labeled { label } | IssuesAction::Unlabeled { label: Some(label) } => {
             let applied_label = label.clone();
@@ -63,6 +74,8 @@ fn parse_label_change_input(
 ) -> Option<NotifyZulipInput> {
     let mut include_config_names: Vec<String> = vec![];
 
+    log::debug!("Entering notify_zulip parse_label_change_input",);
+
     for (name, label_config) in &config.subtables {
         if has_all_required_labels(&event.issue, label_config) {
             match event.action {
@@ -79,6 +92,9 @@ fn parse_label_change_input(
 
     if include_config_names.is_empty() {
         // It seems that there is no match between this event and any notify-zulip config, ignore this event
+        log::debug!(
+            "Mismatch between triagebot config and PR/issue labels. Event will be ignored."
+        );
         return None;
     }
 
@@ -159,6 +175,18 @@ fn parse_open_close_reopen_input(
         .collect()
 }
 
+// TODO: test a label that must /not/ be existing
+// Don't start a poll if it's already accepted
+// See https://rust-lang.zulipchat.com/#narrow/channel/474880-t-compiler.2Fbackports/topic/.23146953.3A.20beta-nominated/near/543694762
+
+// or implement a "negative" notify-zulip.required-labels, Example:
+//
+// [notify-zulip."beta-nominated".compiler]
+// required_labels = ["T-compiler", "-beta-accepted"]
+// required_labels = ["T-compiler", "!beta-accepted"]
+
+// TODO: this feels it can be simplified to just
+// if !issue.labels().iter().all(|l| pattern.matches(&l.name)) { return false; }
 fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bool {
     for req_label in &config.required_labels {
         let pattern = match glob::Pattern::new(req_label) {
@@ -168,7 +196,15 @@ fn has_all_required_labels(issue: &Issue, config: &NotifyZulipLabelConfig) -> bo
                 continue;
             }
         };
+        // handle "!label": that label must not be present
         if !issue.labels().iter().any(|l| pattern.matches(&l.name)) {
+            // if !issue.labels().iter().any(|l| {
+            //     if l.name.starts_with('!') {
+            //         !pattern.matches(&l.name)
+            //     } else {
+            //         pattern.matches(&l.name)
+            //     }
+            // }) {
             return false;
         }
     }
@@ -184,6 +220,13 @@ pub(super) async fn handle_input(
 ) -> anyhow::Result<()> {
     for input in inputs {
         let tables_config = &config.labels[&input.label.name];
+
+        log::debug!(
+            "Entering notify_zulip handle_input: IssuesAction = {:?}, issue.is_pr() = {}, draft = {}",
+            event.action,
+            event.issue.is_pr(),
+            event.issue.draft
+        );
 
         // Get valid label configs
         let mut label_configs: Vec<&NotifyZulipLabelConfig> = vec![];
@@ -330,5 +373,14 @@ fn test_notification() {
         ],
         "Needs `I-{team}-nominated`?".to_string(),
     );
+    assert!(msg.contains("Needs `I-{team}-nominated`?"), "{msg}");
+}
+
+#[test]
+fn test_require_labels_inverse() {
+    // TODO: test a label that must /not/ be existing
+    // Don't start a poll if it's already accepted
+    // See https://rust-lang.zulipchat.com/#narrow/channel/474880-t-compiler.2Fbackports/topic/.23146953.3A.20beta-nominated/near/543694762
+    let msg = replace_team_to_be_nominated(&[], "Needs `I-{team}-nominated`?".to_string());
     assert!(msg.contains("Needs `I-{team}-nominated`?"), "{msg}");
 }
