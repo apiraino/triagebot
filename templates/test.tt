@@ -1,0 +1,9 @@
+{% macro input(label, type="text") %}PRINTING {{ label }} from macro input{% endmacro input %}
+
+--
+
+PLACEHOLDER TEXT
+
+{{ age }}
+
+{{ self::input(label="lalala") }}

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
+use std::io::Error;
 use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
@@ -30,6 +31,7 @@ pub struct Query<'a> {
 pub enum QueryKind {
     List,
     Count,
+    Skip,
 }
 
 pub struct QueryMap<'a> {
@@ -86,11 +88,28 @@ pub struct MCPDetails {
     pub concerns: Option<Vec<(String, String)>>,
 }
 
-pub static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| match Tera::new("templates/*") {
-    Ok(t) => t,
-    Err(e) => {
-        println!("Parsing error(s): {e}");
-        ::std::process::exit(1);
+// pub static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| match Tera::new("templates/*") {
+//     Ok(t) => t,
+//     Err(e) => {
+//         println!("Parsing error(s): {e}");
+//         ::std::process::exit(1);
+//     }
+// });
+
+pub static TEMPLATES: LazyLock<Tera> = LazyLock::new(|| {
+    match {
+        // TODO: add all templates at compile-time, in the right order (!)
+        let tpl_contents = include_str!("../templates/prioritization_agenda.tt");
+        let mut tera = Tera::default();
+        tera.add_raw_template("prioritization_agenda", &tpl_contents)
+            .unwrap();
+        Ok::<Tera, Error>(tera)
+    } {
+        Ok(t) => t,
+        Err(e) => {
+            println!("Parsing error(s): {e}");
+            ::std::process::exit(1);
+        }
     }
 });
 
@@ -110,17 +129,21 @@ impl Action for Step<'_> {
         let mut gh = GithubClient::new_from_env();
         gh.set_retry_rate_limit(true);
         let team_api = TeamClient::new_from_env();
-
-        // Try retrieving triage logs for this week
         let today = chrono::Utc::now().date_naive();
-        let triage_logs = match get_compiler_perf_triage_logs(&gh, today).await {
-            Ok(logs) => logs,
-            Err(err) => {
-                tracing::log::debug!("Compiler triage logs failed because: {:?}", err);
-                format!(
-                    "TODO: failed to retrieve triage logs for this week ({today}), get them manually."
-                )
+
+        // If compiling the T-compiler agenda, retrieve perf. triage logs for this week
+        let triage_logs = if self.name == "prioritization_agenda" {
+            match get_compiler_perf_triage_logs(&gh, today).await {
+                Ok(logs) => logs,
+                Err(err) => {
+                    tracing::log::debug!("Compiler triage logs failed because: {:?}", err);
+                    format!(
+                        "TODO: failed to retrieve triage logs for this week ({today}), get them manually."
+                    )
+                }
             }
+        } else {
+            "".to_string()
         };
 
         let mut context = Context::new();
@@ -130,65 +153,75 @@ impl Action for Step<'_> {
             Vec::new();
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(5));
 
-        for Query { repos, queries } in &self.actions {
-            for repo in repos {
-                let repository = Repository {
-                    full_name: format!("{}/{}", repo.0, repo.1),
-                    // These are unused for query.
-                    default_branch: "master".to_string(),
-                    fork: false,
-                    parent: None,
-                };
+        // TODO: test the whole shebangs
+        let xxx = true;
+        if xxx {
+            for Query { repos, queries } in &self.actions {
+                for repo in repos {
+                    let repository = Repository {
+                        full_name: format!("{}/{}", repo.0, repo.1),
+                        // These are unused for query.
+                        default_branch: "master".to_string(),
+                        fork: false,
+                        parent: None,
+                    };
 
-                for QueryMap { name, kind, query } in queries {
-                    let semaphore = semaphore.clone();
-                    let name = String::from(*name);
-                    let kind = *kind;
-                    let repository = repository.clone();
-                    let gh = gh.clone();
-                    let team_api = team_api.clone();
-                    let query = query.clone();
-                    handles.push(tokio::task::spawn(async move {
-                        let _permit = semaphore.acquire().await?;
-                        let fcps_groups = ["proposed_fcp", "in_pre_fcp", "in_fcp"];
-                        let mcps_groups = [
-                            "mcp_new_not_seconded",
-                            "mcp_old_not_seconded",
-                            "mcp_accepted",
-                            "in_pre_fcp",
-                            "in_fcp",
-                        ];
-                        let issues = query
-                            .query(
-                                &repository,
-                                fcps_groups.contains(&name.as_str()),
-                                mcps_groups.contains(&name.as_str())
-                                    && repository.full_name.contains("rust-lang/compiler-team"),
-                                &gh,
-                                &team_api,
-                            )
-                            .await?;
-                        Ok((name, kind, issues))
-                    }));
+                    for QueryMap { name, kind, query } in queries {
+                        let semaphore = semaphore.clone();
+                        let name = String::from(*name);
+                        let kind = *kind;
+                        let repository = repository.clone();
+                        let gh = gh.clone();
+                        let team_api = team_api.clone();
+                        let query = query.clone();
+                        handles.push(tokio::task::spawn(async move {
+                            let _permit = semaphore.acquire().await?;
+                            let fcps_groups = ["proposed_fcp", "in_pre_fcp", "in_fcp"];
+                            let mcps_groups = [
+                                "mcp_new_not_seconded",
+                                "mcp_old_not_seconded",
+                                "mcp_accepted",
+                                "in_pre_fcp",
+                                "in_fcp",
+                            ];
+                            let issues = query
+                                .query(
+                                    &repository,
+                                    fcps_groups.contains(&name.as_str()),
+                                    mcps_groups.contains(&name.as_str())
+                                        && repository.full_name.contains("rust-lang/compiler-team"),
+                                    &gh,
+                                    &team_api,
+                                )
+                                .await?;
+                            Ok((name, kind, issues))
+                        }));
+                    }
                 }
             }
         }
 
-        for handle in handles {
-            let (name, kind, issues) = handle.await.unwrap()?;
-            match kind {
-                QueryKind::List => {
-                    results.entry(name).or_insert(Vec::new()).extend(issues);
-                }
-                QueryKind::Count => {
-                    let count = issues.len();
-                    let result = if let Some(value) = context.get(&name) {
-                        value.as_u64().unwrap() + count as u64
-                    } else {
-                        count as u64
-                    };
+        if xxx {
+            for handle in handles {
+                let (name, kind, issues) = handle.await.unwrap()?;
+                match kind {
+                    QueryKind::List => {
+                        results.entry(name).or_insert(Vec::new()).extend(issues);
+                    }
+                    QueryKind::Count => {
+                        let count = issues.len();
+                        let result = if let Some(value) = context.get(&name) {
+                            value.as_u64().unwrap() + count as u64
+                        } else {
+                            count as u64
+                        };
 
-                    context.insert(name, &result);
+                        context.insert(name, &result);
+                    }
+                    QueryKind::Skip => {
+                        // results.entry(name).or_insert(Vec::new()).extend(issues);
+                        context.insert(name, "no-op");
+                    }
                 }
             }
         }
@@ -196,14 +229,17 @@ impl Action for Step<'_> {
         for (name, issues) in &results {
             context.insert(name, issues);
         }
-
-        let date = chrono::Utc::now().date_naive();
-        context.insert("CURRENT_DATE", &date);
-
+        context.insert("CURRENT_DATE", &today);
         context.insert("triage_logs", &triage_logs);
 
-        Ok(TEMPLATES
-            .render(&format!("{}.tt", self.name), &context)
-            .unwrap())
+        dbg!(&TEMPLATES.get_template_names().collect::<Vec<&str>>());
+        dbg!(&TEMPLATES);
+        dbg!(&context);
+
+        let r = TEMPLATES.render(self.name, &context).unwrap();
+
+        dbg!(r);
+
+        Ok("DONE".to_string())
     }
 }

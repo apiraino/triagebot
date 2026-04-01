@@ -19,7 +19,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // MCP/FCP queries
                     QueryMap {
                         name: "mcp_new_not_seconded",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["major-change", "to-announce"],
@@ -36,7 +36,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "mcp_old_not_seconded",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["major-change"],
@@ -54,7 +54,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "in_pre_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["proposed-final-comment-period"],
@@ -63,7 +63,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "in_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["final-comment-period"],
@@ -72,7 +72,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "mcp_accepted",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "all")],
                             include_labels: vec!["major-change-accepted", "to-announce"],
@@ -81,7 +81,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "fcp_finished",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "all")],
                             include_labels: vec![
@@ -99,7 +99,7 @@ pub fn prioritization() -> Box<dyn Action> {
                 queries: vec![
                     QueryMap {
                         name: "in_pre_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["proposed-final-comment-period", "T-compiler"],
@@ -108,7 +108,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "in_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["final-comment-period", "T-compiler"],
@@ -117,7 +117,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "fcp_finished_tcompiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "all")],
                             include_labels: vec![
@@ -136,7 +136,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "fcp_finished_not_tcompiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "all")],
                             include_labels: vec![
@@ -154,7 +154,7 @@ pub fn prioritization() -> Box<dyn Action> {
                 queries: vec![
                     QueryMap {
                         name: "in_pre_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["proposed-final-comment-period"],
@@ -163,7 +163,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "in_fcp",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["final-comment-period"],
@@ -172,7 +172,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "fcp_finished",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "all")],
                             include_labels: vec![
@@ -191,7 +191,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // beta nomination queries
                     QueryMap {
                         name: "beta_nominated_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![],
                             include_labels: vec!["beta-nominated", "T-compiler"],
@@ -201,7 +201,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // stable nomination queries
                     QueryMap {
                         name: "stable_nominated_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![],
                             include_labels: vec!["stable-nominated", "T-compiler"],
@@ -211,7 +211,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // beta nomination t-types
                     QueryMap {
                         name: "beta_nominated_t_types",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![],
                             include_labels: vec!["beta-nominated", "T-types"],
@@ -221,7 +221,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // stable nomination queries
                     QueryMap {
                         name: "stable_nominated_t_types",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![],
                             include_labels: vec!["stable-nominated", "T-Types"],
@@ -231,7 +231,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // prs waiting on team queries
                     QueryMap {
                         name: "prs_waiting_on_team_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["S-waiting-on-t-compiler"],
@@ -385,7 +385,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "p_critical_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["T-compiler", "P-critical"],
@@ -394,7 +394,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "p_critical_t_types",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["T-types", "P-critical"],
@@ -403,7 +403,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "beta_regressions_p_high",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["regression-from-stable-to-beta", "P-high"],
@@ -418,7 +418,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "nightly_regressions_unassigned_p_high",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open"), ("no", "assignee")],
                             include_labels: vec!["regression-from-stable-to-nightly", "P-high"],
@@ -433,7 +433,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "nominated_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["I-compiler-nominated"],
@@ -442,7 +442,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     },
                     QueryMap {
                         name: "top_unreviewed_prs",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(LeastRecentlyReviewedPullRequests),
                     },
                 ],
@@ -454,7 +454,7 @@ pub fn prioritization() -> Box<dyn Action> {
                     // https://github.com/rust-lang/rfcs/pulls?q=is%3Aopen+label%3AI-compiler-nominated
                     QueryMap {
                         name: "nominated_rfcs_t_compiler",
-                        kind: QueryKind::List,
+                        kind: QueryKind::Skip,
                         query: Arc::new(IssueQuery {
                             filters: vec![("state", "open")],
                             include_labels: vec!["I-compiler-nominated"],

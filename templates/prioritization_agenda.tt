@@ -1,6 +1,41 @@
-{% import "_issues.tt" as issues %}
-{% import "_meetings.tt" as meetings %}
-{% import "_issues_rfcbot.tt" as issues_rfcbot %}
+{% macro render_issue(issue, with_age="", backport_branch="") %}{% if issue.is_blocked %}[blocked] {% endif %}"{{issue.title}}" [{{issue.repo_name}}#{{issue.number}}]({{issue.html_url}}){% if issue.mcp_details.zulip_link %} ([Zulip]({{issue.mcp_details.zulip_link}})){% endif %}{% if with_age %} (last review activity: {{issue.updated_at_hts}}){%- endif -%}
+{%- if backport_branch != "" %}
+  - Authored by {{ issue.author }}
+  - Voting [Zulip topic](#)
+<!--
+@**triagebot** backport {{ backport_branch }} accept {{ issue.number }}
+@**triagebot** backport {{ backport_branch }} decline {{ issue.number }}
+-->
+{%- endif -%}
+{% if issue.mcp_details.concerns %}{%- for concern in issue.mcp_details.concerns %}
+    - concern: [{{- concern.0 -}}]({{- concern.1 -}})
+{%- endfor -%}{%- endif -%}
+{% endmacro render_issue %}
+
+{% macro render_issues(issues, indent="", backport_branch="", with_age=false, empty="No issues at this time.") %}
+{%- for issue in issues %}
+{{indent}}- {{ backport_branch }}{{self::render_issue(issue=issue, with_age=with_age, backport_branch=backport_branch)}}{% else %}
+{{indent}}- {{empty}}{% endfor -%}
+{% endmacro render_issues %}
+
+{% macro render_meeting(meetings, empty="No other meetings scheduled.") %}
+{%- for mtg in meetings %}
+- [{{ mtg.summary }}]({{ mtg.html_link }}) at <time:{{ mtg.start.date_time }}>{% else %}
+- {{empty}}{% endfor -%}
+{% endmacro render_meeting %}
+
+{% macro render_rfc(issues, indent="", empty="None.") %}
+{%- for issue in issues %}
+{%- if issue.fcp_details is object %}
+{{indent}}- {{issue.fcp_details.disposition}}: [{{issue.title}} ({{issue.repo_name}}#{{issue.number}})]({{issue.fcp_details.bot_tracking_comment_html_url}})
+{{indent}}{{indent}}-{% for reviewer in issue.fcp_details.pending_reviewers %} @{% if issue.fcp_details.should_mention %}{% else %}_{% endif %}**|{{reviewer.zulip_id}}**{%else%} no pending checkboxes{% endfor %}
+{{indent}}{{indent}}-{% if issue.fcp_details.concerns|length > 0 %} concerns:{% endif %}{% for concern in issue.fcp_details.concerns %} [{{concern.name}} (by {{concern.reviewer_login}})]({{concern.concern_url}}){%else%} no pending concerns{% endfor -%}
+{% else %}
+{{indent}}- {{self::render_issue(issue=issue)}}
+{%- endif -%}
+{% else %}
+{{indent}}- {{empty}}{%endfor-%}
+{% endmacro render_rfc %}
 
 ---
 tags: weekly, rustc
@@ -23,38 +58,38 @@ note_id: xxx
 ## MCPs/FCPs
 
 - New MCPs (take a look, see if you like them!)
-{{-issues::render(issues=mcp_new_not_seconded, indent="  ", empty="No new proposals this time.")}}
+{{-self::render_issues(issues=mcp_new_not_seconded, indent="  ", empty="No new proposals this time.")}}
 - Old MCPs (stale MCP might be closed as per [MCP procedure](https://forge.rust-lang.org/compiler/mcp.html#when-should-major-change-proposals-be-closed))
   - None at this time
 - Old MCPs (not seconded, take a look)
-{{-issues::render(issues=mcp_old_not_seconded, indent="  ", with_age=true, empty="No old proposals this time.")}}
+{{-self::render_issues(issues=mcp_old_not_seconded, indent="  ", with_age=true, empty="No old proposals this time.")}}
 - Pending FCP requests (check your boxes!)
 {{-issues_rfcbot::render(issues=in_pre_fcp, indent="  ", empty="No pending FCP requests this time.")}}
 - Things in FCP (make sure you're good with it)
 {{-issues_rfcbot::render(issues=in_fcp, indent="  ", empty="No FCP requests this time.")}}
 - Accepted MCPs
-{{-issues::render(issues=mcp_accepted, indent="  ", empty="No new accepted proposals this time.")}}
+{{-self::render_issues(issues=mcp_accepted, indent="  ", empty="No new accepted proposals this time.")}}
 - MCPs blocked on unresolved concerns
   - <Here group MCPs blocked on unresolved concerns>
 - Finalized FCPs (disposition merge)
-{{-issues::render(issues=fcp_finished_tcompiler, indent="  ", empty="No new finished FCP (disposition merge) this time.")}}
+{{-self::render_issues(issues=fcp_finished_tcompiler, indent="  ", empty="No new finished FCP (disposition merge) this time.")}}
 - Other teams finalized FCPs
-{{-issues::render(issues=fcp_finished_not_tcompiler, indent="  ", empty="No new finished FCP (disposition merge) this time.")}}
+{{-self::render_issues(issues=fcp_finished_not_tcompiler, indent="  ", empty="No new finished FCP (disposition merge) this time.")}}
 
 ## Backport nominations
 
 [T-compiler beta](https://github.com/rust-lang/rust/issues?q=is%3Apr+label%3Abeta-nominated+-label%3Abeta-accepted+label%3AT-compiler) / [T-compiler stable](https://github.com/rust-lang/rust/issues?q=is%3Apr+label%3Astable-nominated+-label%3Astable-accepted+label%3AT-compiler)
-{{-issues::render(issues=beta_nominated_t_compiler, backport_branch=":beta: ", empty="No beta nominations for `T-compiler` this time.")}}
-{{-issues::render(issues=stable_nominated_t_compiler, backport_branch=":stable: ", empty="No stable nominations for `T-compiler` this time.")}}
+{{-self::render_issues(issues=beta_nominated_t_compiler, backport_branch=":beta: ", empty="No beta nominations for `T-compiler` this time.")}}
+{{-self::render_issues(issues=stable_nominated_t_compiler, backport_branch=":stable: ", empty="No stable nominations for `T-compiler` this time.")}}
 
 [T-types beta](https://github.com/rust-lang/rust/issues?q=is%3Apr+label%3Abeta-nominated+-label%3Abeta-accepted+label%3AT-types) / [T-types stable](https://github.com/rust-lang/rust/issues?q=is%3Apr+label%3Astable-nominated+-label%3Astable-accepted+label%3AT-types)
-{{-issues::render(issues=beta_nominated_t_types, backport_branch=":beta:", empty="No beta nominations for `T-types` this time.")}}
-{{-issues::render(issues=stable_nominated_t_types, backport_branch=":stable:", empty="No stable nominations for `T-types` this time.")}}
+{{-self::render_issues(issues=beta_nominated_t_types, backport_branch=":beta:", empty="No beta nominations for `T-types` this time.")}}
+{{-self::render_issues(issues=stable_nominated_t_types, backport_branch=":stable:", empty="No stable nominations for `T-types` this time.")}}
 
 ## PRs S-waiting-on-t-compiler
 
 [T-compiler](https://github.com/rust-lang/rust/pulls?q=is%3Aopen+label%3AS-waiting-on-t-compiler)
-{{-issues::render(issues=prs_waiting_on_team_t_compiler, empty="No PRs waiting on `T-compiler` this time.")}}
+{{-self::render_issues(issues=prs_waiting_on_team_t_compiler, empty="No PRs waiting on `T-compiler` this time.")}}
 - [Issues in progress or waiting on other teams](https://hackmd.io/XYr1BrOWSiqCrl8RCWXRaQ)
 
 ## Issues of Note
@@ -72,18 +107,18 @@ note_id: xxx
 ### P-critical
 
 [T-compiler](https://github.com/rust-lang/rust/issues?q=is%3Aopen+label%3AP-critical+label%3AT-compiler)
-{{-issues::render(issues=p_critical_t_compiler, empty="No `P-critical` issues for `T-compiler` this time.")}}
+{{-self::render_issues(issues=p_critical_t_compiler, empty="No `P-critical` issues for `T-compiler` this time.")}}
 
 [T-types](https://github.com/rust-lang/rust/issues?q=is%3Aopen+label%3AP-critical+label%3AT-types)
-{{-issues::render(issues=p_critical_t_types, empty="No `P-critical` issues for `T-types` this time.")}}
+{{-self::render_issues(issues=p_critical_t_types, empty="No `P-critical` issues for `T-types` this time.")}}
 
 ### P-high regressions
 
 [P-high beta regressions](https://github.com/rust-lang/rust/issues?q=is%3Aopen+label%3Aregression-from-stable-to-beta+label%3AP-high+-label%3AT-infra+-label%3AT-libs+-label%3AT-libs-api+-label%3AT-release+-label%3AT-rustdoc)
-{{-issues::render(issues=beta_regressions_p_high, empty="No `P-high` beta regressions this time.")}}
+{{-self::render_issues(issues=beta_regressions_p_high, empty="No `P-high` beta regressions this time.")}}
 
 [Unassigned P-high nightly regressions](https://github.com/rust-lang/rust/issues?q=is%3Aopen+label%3Aregression-from-stable-to-nightly+label%3AP-high+no%3Aassignee+-label%3AT-infra+-label%3AT-libs+-label%3AT-libs-api+-label%3AT-release+-label%3AT-rustdoc+-label%3AT-bootstrap)
-{{-issues::render(issues=nightly_regressions_unassigned_p_high, empty="No unassigned `P-high` nightly regressions this time.")}}
+{{-self::render_issues(issues=nightly_regressions_unassigned_p_high, empty="No unassigned `P-high` nightly regressions this time.")}}
 
 ## Performance logs
 
@@ -94,16 +129,16 @@ note_id: xxx
 ## Nominated Issues
 
 [T-compiler](https://github.com/rust-lang/rust/issues?q=is%3Aopen+label%3AI-compiler-nominated)
-{{-issues::render(issues=nominated_t_compiler, empty="No I-compiler-nominated issues this time.")}}
+{{-self::render_issues(issues=nominated_t_compiler, empty="No I-compiler-nominated issues this time.")}}
 
 [RFC](https://github.com/rust-lang/rfcs/issues?q=is%3Aopen+label%3AI-compiler-nominated)
-{{-issues::render(issues=nominated_rfcs_t_compiler, empty="No I-compiler-nominated RFCs this time.")}}
+{{-self::render_issues(issues=nominated_rfcs_t_compiler, empty="No I-compiler-nominated RFCs this time.")}}
 
 ### Oldest PRs waiting for review
 
 (TIP) Curate this list before the meeting
 
 [T-compiler](https://github.com/rust-lang/rust/pulls?q=is%3Apr+is%3Aopen+sort%3Aupdated-asc+label%3AS-waiting-on-review+draft%3Afalse+label%3AT-compiler)
-{{-issues::render(issues=top_unreviewed_prs, with_age=true, empty="No unreviewed PRs on `T-compiler` this time.")}}
+{{-self::render_issues(issues=top_unreviewed_prs, with_age=true, empty="No unreviewed PRs on `T-compiler` this time.")}}
 
 Next meetings' agenda draft: [hackmd link](#)
