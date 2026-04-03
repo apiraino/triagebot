@@ -357,15 +357,20 @@ async fn handle_command<'a>(
                 }
                 StreamCommand::DocsUpdate => trigger_docs_update(message_data, &ctx.zulip),
                 StreamCommand::Backport(args) => {
-                    let _ = match accept_decline_backport(&ctx, message_data, &args).await {
+                    let retval = match accept_decline_backport(&ctx, message_data, &args).await {
                         // give user feedback
-                        Ok(_) => ctx.zulip.add_reaction(message_data.id, "check").await,
+                        Ok(_) => {
+                            let _ = ctx.zulip.add_reaction(message_data.id, "check").await;
+                            Ok(None)
+                        }
                         Err(err) => {
-                            log::error!("Could not handle backport #{}: {:?}", args.pr_num, err);
-                            ctx.zulip.add_reaction(message_data.id, "scream").await
+                            let err_msg = format!("Could not handle backport #{}", args.pr_num);
+                            log::error!("{err_msg}: {:?}", err);
+                            let _ = ctx.zulip.add_reaction(message_data.id, "scream").await;
+                            Ok(Some(err_msg))
                         }
                     };
-                    Ok(None)
+                    retval
                 }
                 StreamCommand::UserInfo {
                     username,
@@ -374,19 +379,21 @@ async fn handle_command<'a>(
                     .await
                     .map(Some),
                 StreamCommand::AssignPriority(args) => {
-                    let _ = match assign_issue_prio(&ctx, message_data, &args).await {
+                    let retval = match assign_issue_prio(&ctx, message_data, &args).await {
                         // give user feedback
-                        Ok(_) => ctx.zulip.add_reaction(message_data.id, "check").await,
+                        Ok(_) => {
+                            let _ = ctx.zulip.add_reaction(message_data.id, "check").await;
+                            Ok(None)
+                        }
                         Err(err) => {
-                            log::error!(
-                                "Could not assign priority to #{}: {:?}",
-                                args.issue_num,
-                                err
-                            );
-                            ctx.zulip.add_reaction(message_data.id, "scream").await
+                            let err_msg =
+                                format!("Could not assign priority to #{}", args.issue_num);
+                            log::error!("{err_msg}: {:?}", err);
+                            let _ = ctx.zulip.add_reaction(message_data.id, "scream").await;
+                            Ok(Some(err_msg))
                         }
                     };
-                    Ok(None)
+                    retval
                 }
             };
         }
