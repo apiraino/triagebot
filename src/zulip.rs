@@ -28,7 +28,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
 use axum::response::IntoResponse;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use itertools::Itertools;
 use rust_team_data::v1::{TeamKind, TeamMember};
 use secrecy::{ExposeSecret, SecretString};
@@ -280,6 +280,39 @@ async fn handle_command<'a>(
                 let repo = normalize_repo(&ctx, repo).await?;
                 team_status_cmd(&ctx, name, &repo).await
             }
+            ChatCommand::OneToOneMeeting {
+                command,
+                persons,
+                created_at,
+                notes,
+                team_name,
+            } => {
+                let targets = persons.split("+").collect::<Vec<&str>>();
+                if command == "record" {
+                    let dt = chrono::NaiveDate::parse_from_str(
+                        &created_at.as_ref().unwrap(),
+                        "%Y-%m-%d",
+                    )
+                    .unwrap();
+                    // @triagebot one-to-one record apiraino YYYY-MM-DD "notes"
+                    let _ = match record_one_to_one_meetings(targets[0], dt, notes).await {
+                        // return user feedback
+                        Ok(_) => ctx.zulip.add_reaction(message_data.id, "check").await,
+                        Err(err) => {
+                            log::error!("Could not register record: {err:?}");
+                            ctx.zulip.add_reaction(message_data.id, "scream").await
+                        }
+                    };
+                    Ok(None)
+                } else if command == "query" {
+                    // @triagebot one-to-one query davidtwco+apiraino compiler
+                    Ok(query_one_to_one_meetings(targets, team_name).await?)
+                } else {
+                    Err(anyhow::anyhow!(
+                        "{command}' not understood. Please use either `record` or `query`"
+                    ))
+                }
+            }
         };
 
         let output = output?;
@@ -408,6 +441,23 @@ async fn handle_command<'a>(
         tracing::warn!("no command found, yet we were pinged, weird");
         Ok(Some("Unknown command".to_string()))
     }
+}
+
+async fn record_one_to_one_meetings(
+    targets: &str,
+    created_at: NaiveDate,
+    notes: &Option<String>,
+) -> anyhow::Result<Option<String>> {
+    log::debug!("Will save {targets:?} date={created_at:?} with notes={notes:?}");
+    Ok(Some("OK".to_string()))
+}
+
+async fn query_one_to_one_meetings(
+    targets: Vec<&str>,
+    team_name: &Option<String>,
+) -> anyhow::Result<Option<String>> {
+    log::debug!("Will query {targets:?} for team={team_name:?}");
+    Ok(Some("Here is the list".to_string()))
 }
 
 async fn accept_decline_backport(
@@ -1207,7 +1257,8 @@ fn get_cmd_impersonation_mode(cmd: &ChatCommand) -> ImpersonationMode {
         | ChatCommand::UserInfo { .. }
         | ChatCommand::TeamStats { .. }
         | ChatCommand::Unlock { .. }
-        | ChatCommand::Lookup(_) => ImpersonationMode::Disabled,
+        | ChatCommand::Lookup(_)
+        | ChatCommand::OneToOneMeeting { .. } => ImpersonationMode::Disabled,
         ChatCommand::Whoami => ImpersonationMode::Silent,
         ChatCommand::Work(cmd) => match cmd {
             WorkqueueCmd::Show { .. } => ImpersonationMode::Silent,

@@ -50,6 +50,21 @@ pub enum ChatCommand {
         #[arg(long, default_value_t = get_default_org_repo())]
         repo: String,
     },
+    /// Record or query 1:1 meetings between team project members
+    #[clap(alias = "one-to-one")]
+    OneToOneMeeting {
+        /// The command. Can be `record` or `query`
+        command: String,
+        /// Persons (uses `+` separator), f.e. davidtwco+BoxyUwU
+        /// if one item, f.e. BoxyUwU, assume it's a query command,
+        persons: String,
+        /// Date of the record
+        created_at: Option<String>,
+        /// Notes when creating the record
+        notes: Option<String>,
+        /// Team where these persons are
+        team_name: Option<String>,
+    },
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
