@@ -95,7 +95,12 @@ define_config! {
     range_diff: RangeDiffConfig,
     review_changes_since: ReviewChangesSinceConfig,
     view_all_comments_link: ViewAllCommentsLinkConfig,
+    pr_approved: PrApprovedConfig,
 }
+
+#[derive(PartialEq, Eq, Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PrApprovedConfig {}
 
 #[derive(PartialEq, Eq, Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

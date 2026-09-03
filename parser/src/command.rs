@@ -3,6 +3,7 @@ use crate::ignore_block::IgnoreBlocks;
 use crate::token::Tokenizer;
 use regex::Regex;
 
+pub mod approve;
 pub mod assign;
 pub mod close;
 pub mod concern;
@@ -32,6 +33,7 @@ pub enum Command<'a> {
     Concern(Result<concern::ConcernCommand, Error<'a>>),
     Transfer(Result<transfer::TransferCommand, Error<'a>>),
     Merge(Result<merge::MergeCommand, Error<'a>>),
+    ApprovePr(Result<approve::ApproveCommand, Error<'a>>),
 }
 
 #[derive(Debug)]
@@ -230,6 +232,7 @@ impl Command<'_> {
             Command::Concern(r) => r.is_ok(),
             Command::Transfer(r) => r.is_ok(),
             Command::Merge(r) => r.is_ok(),
+            Command::ApprovePr(r) => r.is_ok(),
         }
     }
 

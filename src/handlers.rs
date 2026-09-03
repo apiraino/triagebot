@@ -1,7 +1,9 @@
 use crate::config::{self, Config, ConfigurationError};
 use crate::gh_comments::GitHubCommentsCache;
 use crate::gha_logs::GitHubActionLogsCache;
-use crate::github::{Event, GithubClient, IssueCommentAction, IssuesAction, IssuesEvent};
+use crate::github::{
+    Event, GithubClient, IssueCommentAction, IssuesAction, IssuesEvent, PullRequestReviewEvent,
+};
 use crate::handlers::pr_tracking::RepositoryWorkqueueMap;
 use crate::team_data::TeamClient;
 use crate::zulip::client::ZulipClient;
@@ -32,6 +34,7 @@ mod nominate;
 mod note;
 mod notify_zulip;
 mod ping;
+mod pr_approved;
 pub mod pr_tracking;
 mod prioritize;
 pub mod pull_requests_assignment_update;
@@ -62,6 +65,7 @@ pub struct Context {
     pub gh_comments: Arc<tokio::sync::RwLock<GitHubCommentsCache>>,
 }
 
+// TODO: what is this "handle" method?
 #[expect(
     clippy::collapsible_if,
     reason = "we check the preconditions in the outer if, and handle errors inside"
@@ -73,9 +77,15 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
     }
     let mut errors = Vec::new();
 
+    log::debug!(">>> What's happening here?");
+
     if let (Ok(config), Event::Issue(event)) = (config.as_ref(), event) {
         handle_issue(ctx, event, config, &mut errors).await;
     }
+
+    // if let (Ok(config), Event::PullRequest(event)) = (config.as_ref(), event) {
+    //     handle_pr(ctx, event, config, &mut errors).await;
+    // }
 
     if let Some(body) = event.comment_body() {
         handle_command(ctx, event, &config, body, &mut errors).await;
@@ -105,6 +115,20 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
             assign::handle_comment(ctx, assign_config, event)
                 .await
                 .map_err(|e| HandlerError::Other(e.context("assign (from reviews) handler failed")))
+        } else {
+            Ok(())
+        }
+    };
+
+    // we are in handle()
+    let pr_approved = async {
+        if let Some(assign_config) = config.as_ref().ok().and_then(|c| c.assign.as_ref())
+            && let Event::IssueComment(event) = event
+        {
+            log::debug!("HANDLING handle_pr_approved!");
+            backport::handle_pr_approved(ctx, &event)
+                .await
+                .map_err(|e| HandlerError::Other(e.context("pr_approved handler failed")))
         } else {
             Ok(())
         }
@@ -186,6 +210,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
             .ok()
             .and_then(|c| c.review_submitted.as_ref())
         {
+            log::debug!("REVIEW SUBMITTED!");
             review_submitted::handle(
                 ctx,
                 event,
@@ -256,6 +281,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ) = futures::join!(
         prune_gh_comments,
         assign_comments,
@@ -271,6 +297,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved
     );
 
     for result in [
@@ -288,6 +315,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ] {
         if let Err(e) = result {
             errors.push(e);
@@ -356,7 +384,7 @@ macro_rules! issue_handlers {
 // Handle events that happened on issues
 //
 // This is for events that happen only on issues or pull requests (e.g. label changes or assignments).
-// Each module in the list must contain the functions `parse_input` and `handle_input`.
+// Each module in the list lives in `./src/handlers` and must contain the functions `parse_input` and `handle_input`.
 issue_handlers! {
     assign,
     autolabel,
@@ -368,6 +396,66 @@ issue_handlers! {
     review_requested,
     pr_tracking,
 }
+
+// macro_rules! pr_handlers {
+//     ($($name:ident,)*) => {
+//         async fn handle_pr(
+//             ctx: &Context,
+//             event: &PullRequestReviewEvent,
+//             config: &Arc<Config>,
+//             errors: &mut Vec<HandlerError>,
+//         ) {
+//             // Process the issue handlers concurrently
+//             let results = futures::join!(
+//                 $(
+//                     async {
+//                         match $name::parse_input(ctx, event, config.$name.as_ref()).await {
+//                             Err(err) => Err(HandlerError::Message(err)),
+//                             Ok(Some(input)) => {
+//                                 if let Some(config) = &config.$name {
+//                                     $name::handle_input(ctx, config, event, input)
+//                                         .await
+//                                         .map_err(|mut e| {
+//                                             if let Some(err) = e.downcast_mut::<crate::errors::UserError>() {
+//                                                 HandlerError::Message(err.to_string())
+//                                             } else {
+//                                                 HandlerError::Other(e.context(format!(
+//                                                     "error when processing {} handler",
+//                                                     stringify!($name)
+//                                                 )))
+//                                             }
+//                                         })
+//                                 } else {
+//                                     Err(HandlerError::Message(format!(
+//                                         "The feature `{}` is not enabled in this repository.\n\
+//                                         To enable it add its section in the `triagebot.toml` \
+//                                         in the root of the repository.",
+//                                         stringify!($name)
+//                                     )))
+//                                 }
+//                             }
+//                             Ok(None) => Ok(())
+//                         }
+//                     }
+//                 ),*
+//             );
+
+//             // Destructure the results into named variables
+//             let ($($name,)*) = results;
+
+//             // Push errors for each handler
+//             $(
+//                 if let Err(e) = $name {
+//                     errors.push(e);
+//                 }
+//             )*
+//         }
+//     }
+// }
+
+// pr_handlers! {
+//     //backport,
+// }
 
 macro_rules! command_handlers {
     ($($name:ident: $enum:ident,)*) => {
@@ -395,7 +483,9 @@ macro_rules! command_handlers {
                 }
                 Event::IssueComment(e) => {
                     match e.action {
-                        IssueCommentAction::Created => {}
+                        IssueCommentAction::Created => {
+                            log::debug!("[handlers::command_handlers] >>> Are you getting here?");
+                        }
                         IssueCommentAction::Edited => {
                             if !event.has_comment_changed() {
                                 // We are not entirely sure why this happens.
@@ -419,6 +509,10 @@ macro_rules! command_handlers {
                     log::debug!("skipping unsupported event");
                     return;
                 }
+                Event::PullRequest(_pull_request_review_event) => {
+                    log::debug!("skipping event, it's a PR");
+                    return;
+                }
             }
 
             let input = Input::new(&body, vec![&ctx.username, "triagebot"]);
@@ -429,6 +523,8 @@ macro_rules! command_handlers {
                 input.collect()
             };
 
+            // Here I want to see the command parsed
+            // (Do I?)
             log::info!("Comment parsed to {commands:?}");
 
             if commands.is_empty() {
@@ -520,6 +616,7 @@ command_handlers! {
     concern: Concern,
     transfer: Transfer,
     merge: Merge,
+    pr_approved: ApprovePr,
 }
 
 #[derive(Debug)]

@@ -19,6 +19,7 @@ pub enum Event {
     IssueComment(IssueCommentEvent),
     /// Activity on an issue or PR.
     Issue(IssuesEvent),
+    PullRequest(PullRequestReviewEvent),
     /// One or more commits are pushed to a repository branch or tag.
     Push(PushEvent),
 }
@@ -30,6 +31,7 @@ impl Event {
             Event::IssueComment(event) => &event.repository,
             Event::Issue(event) => &event.repository,
             Event::Push(event) => &event.repository,
+            Event::PullRequest(_pull_request_review_event) => todo!(),
         }
     }
 
@@ -39,6 +41,7 @@ impl Event {
             Event::IssueComment(event) => Some(&event.issue),
             Event::Issue(event) => Some(&event.issue),
             Event::Push(_) => None,
+            Event::PullRequest(_pull_request_review_event) => None,
         }
     }
 
@@ -49,6 +52,7 @@ impl Event {
             Event::Issue(e) => Some(&e.issue.body),
             Event::IssueComment(e) => Some(&e.comment.body),
             Event::Push(_) => None,
+            Event::PullRequest(_pull_request_review_event) => None,
         }
     }
 
@@ -59,6 +63,7 @@ impl Event {
             Event::Issue(e) => Some(&e.changes.as_ref()?.body.as_ref()?.from),
             Event::IssueComment(e) => Some(&e.changes.as_ref()?.body.as_ref()?.from),
             Event::Push(_) => None,
+            Event::PullRequest(_pull_request_review_event) => None,
         }
     }
 
@@ -75,6 +80,7 @@ impl Event {
                 .as_ref()
                 .map_or(false, |changes| changes.has_comment_changed(&e.issue)),
             Event::Push(_) => false,
+            Event::PullRequest(_pull_request_review_event) => todo!(),
         }
     }
 
@@ -84,6 +90,7 @@ impl Event {
             Event::Issue(e) => Some(&e.issue.html_url),
             Event::IssueComment(e) => Some(&e.comment.html_url),
             Event::Push(_) => None,
+            Event::PullRequest(_pull_request_review_event) => None,
         }
     }
 
@@ -93,6 +100,7 @@ impl Event {
             Event::Issue(e) => &e.issue.user,
             Event::IssueComment(e) => &e.comment.user,
             Event::Push(e) => &e.sender,
+            Event::PullRequest(_pull_request_review_event) => todo!(),
         }
     }
 
@@ -106,6 +114,7 @@ impl Event {
                 .or(e.comment.created_at)
                 .map(Into::into),
             Event::Push(_) => None,
+            Event::PullRequest(_pull_request_review_event) => None,
         }
     }
 }
@@ -203,6 +212,9 @@ impl IssuesEvent {
     }
 }
 
+/// Issues and pull requests events
+///
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request>
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "action")]
 pub enum IssuesAction {

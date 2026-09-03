@@ -9,13 +9,16 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::config::BackportConfig;
-use crate::github::{IssuesAction, IssuesEvent, Label};
+use crate::config::{BackportConfig, ReviewSubmittedConfig, ShortcutConfig};
+use crate::github::{
+    Event, Issue, IssueCommentAction, IssueCommentEvent, IssuesAction, IssuesEvent, Label,
+    PullRequestReviewEvent,
+};
 use crate::handlers::Context;
 use anyhow::Context as AnyhowContext;
 use futures::future::join_all;
 use regex::Regex;
-use tracing as log;
+use tracing::{self as log, info};
 
 // See https://docs.github.com/en/issues/tracking-your-work-with-issues/creating-issues/linking-a-pull-request-to-an-issue
 // See tests to see what matches
@@ -41,6 +44,46 @@ pub(crate) struct BackportInput {
     labels: HashMap<String, Vec<String>>,
 }
 
+// I want this to be invoked by ./src/handlers.rs
+pub(crate) async fn handle_pr_approved(
+    ctx: &Context,
+    event: &IssueCommentEvent,
+) -> anyhow::Result<()> {
+    info!("[backport::handle_pr_approved] handling event {:?}", event);
+    Ok(())
+}
+
+// I want this to be invoked by ./src/handlers.rs
+pub(crate) async fn handle_pr_approved_2(
+    ctx: &Context,
+    event: &ReviewSubmittedConfig,
+) -> anyhow::Result<()> {
+    info!(
+        "[backport::handle_pr_approved_2] handling event {:?}",
+        event
+    );
+    Ok(())
+}
+
+pub(super) async fn _parse_input(
+    _ctx: &Context,
+    event: &PullRequestReviewEvent,
+    _config: Option<&BackportConfig>,
+) -> Result<Option<BackportInput>, String> {
+    dbg!("ACTION", &event.action);
+    dbg!("PULL REQUEST", &event.pull_request);
+    Err("OK".to_string())
+}
+
+pub(super) async fn _handle_input(
+    _ctx: &Context,
+    _config: &BackportConfig,
+    _event: &PullRequestReviewEvent,
+    _input: BackportInput,
+) -> anyhow::Result<()> {
+    Ok(())
+}
+
 pub(super) async fn parse_input(
     ctx: &Context,
     event: &IssuesEvent,
@@ -50,10 +93,22 @@ pub(super) async fn parse_input(
         return Ok(None);
     };
 
+    dbg!("ACTION", &event.action);
+    dbg!("ISSUE", &event.issue);
+
     // Only handle the event when the PR:
-    // - is opened (and not a draft)
-    // - is converted from draft to ready for review
-    // - when the first comment is edited
+    // - NOPE is opened (and not a draft)
+    // - NOPE is converted from draft to ready for review
+    // - NOPE when the first comment is edited
+    //
+    // - is a pull request
+    // - has just been approved (from `IssuesEvent:ReviewRequested` -> `PullRequestReviewEvent:Submitted`)
+    // - is not a draft
+    // - closes a regression defined in REGRESSION_LABELS
+    // - closes a regression with priority defined in PRIORITY_LABELS
+
+    // TODO: can I get a PullRequestReview event here? I want to intercept the PR approval
+    dbg!(&event.action);
     let skip_check = !matches!(
         event.action,
         IssuesAction::Opened | IssuesAction::Edited | IssuesAction::ReadyForReview
@@ -71,6 +126,7 @@ pub(super) async fn parse_input(
 
     let pr_labels: Vec<&str> = pr.labels.iter().map(|l| l.name.as_str()).collect();
 
+    // Don't add a `-nominated` if the PR has a `-accepted` (in case, revert this action)
     if let IssuesAction::Labeled { label } = &event.action {
         if (label.name == "beta-nominated" && contains_any(&pr_labels, &["beta-accepted"]))
             || (label.name == "stable-nominated" && contains_any(&pr_labels, &["stable-accepted"]))

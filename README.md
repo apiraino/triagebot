@@ -68,7 +68,7 @@ When triagebot starts, it eagerly loads the pull request workqueue for the `rust
 To use Postgres, you will need to install it and configure it:
 
 1. Install Postgres. Look online for any help with installing and setting up Postgres (particularly if you need to create a user and set up permissions).
-2. Create a database: `createdb triagebot`
+2. Create a database: `CREATE DATABASE triagebot`
 3. In the `.env` file, set the `DATABASE_URL`:
 
    ```sh
