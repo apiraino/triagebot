@@ -1,6 +1,6 @@
 use chrono::FixedOffset;
 
-use crate::github::{Comment, GitHubUser, Issue, Label, Repository};
+use crate::github::{Comment, GitHubUser, Issue, Label, PullRequestReviewState, Repository};
 
 /// An event triggered by a webhook.
 #[derive(Debug)]
@@ -19,6 +19,8 @@ pub enum Event {
     IssueComment(IssueCommentEvent),
     /// Activity on an issue or PR.
     Issue(IssuesEvent),
+    // TODO: add proper handling for pull requests (instead of coercing them into issues)
+    // PullRequest(PullRequestReviewEvent),
     /// One or more commits are pushed to a repository branch or tag.
     Push(PushEvent),
 }
@@ -52,7 +54,18 @@ impl Event {
         }
     }
 
-    /// This will both extract from `IssueComment` events but also `Issue` events
+    /// Returns the review state of the pull request (`Approved` or else)
+    pub fn pr_review_state(&self) -> Option<&PullRequestReviewState> {
+        match self {
+            // Event::Create(_) => None,
+            // Event::Issue(e) => None,
+            Event::IssueComment(e) => e.comment.pr_review_state.as_ref(),
+            // Event::Push(_) => None,
+            _ => None, //Some(&PullRequestReviewState::Approved),
+        }
+    }
+
+    /// this will both extract from `IssueComment` events but also `Issue` events
     pub fn comment_from(&self) -> Option<&str> {
         match self {
             Event::Create(_) => None,
@@ -171,6 +184,8 @@ pub enum IssueCommentAction {
     Deleted,
     Pinned,
     Unpinned,
+    // XXX: see if I can split PR reviews from other PR comments
+    ReviewSubmitted,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -180,6 +195,14 @@ pub struct IssueCommentEvent {
     pub issue: Issue,
     pub comment: Comment,
     pub repository: Repository,
+}
+
+impl IssueCommentEvent {
+    /// Returns the review state of the pull request (`Approved` or else)
+    /// This is a supplemental check (in addition to IssueCommentAction::ReviewSubmitted) to be sure that the comment is a review submission
+    pub fn pr_review_state(&self) -> Option<&PullRequestReviewState> {
+        self.comment.pr_review_state.as_ref()
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -203,6 +226,9 @@ impl IssuesEvent {
     }
 }
 
+/// Issues and pull requests events
+///
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request>
 #[derive(PartialEq, Eq, Debug, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "action")]
 pub enum IssuesAction {
@@ -252,6 +278,10 @@ pub enum IssuesAction {
     Dequeued,
     Typed,
     Untyped,
+    // custom addition, not in the API
+    // Pairs with PullRequestReviewEvent.PullRequestReviewAction::Submitted
+    // to propagate the event where PullRequestReviewEvent is not used
+    ReviewSubmitted,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -316,6 +346,9 @@ pub enum PullRequestReviewAction {
     Dismissed,
 }
 
+/// A pull request review comment.
+///
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request_review_comment>
 #[derive(Debug, serde::Deserialize)]
 pub struct PullRequestReviewComment {
     pub action: IssueCommentAction,

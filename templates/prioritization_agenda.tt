@@ -12,6 +12,7 @@ note_id: xxx
 
 ## Announcements
 
+- No announcements this week
 - (TIP) add here non-recurrent scheduled meetings, [check the schedule calendar](https://github.com/rust-lang/calendar)
 - (TIP) mention upcoming Rust stable releases, [check the release calendar](https://rust-lang.github.io/calendar/release.ics)
 - Reminder: if you see a PR/issue that seems like there might be legal implications due to copyright/IP/etc, please let us know (or at least message @_**davidtwco** or @_**Boxy** so we can pass it along).
@@ -102,7 +103,7 @@ note_id: xxx
 [RFC](https://github.com/rust-lang/rfcs/issues?q=is%3Aopen+label%3AI-compiler-nominated)
 {{-issues::render(issues=nominated_rfcs_t_compiler, empty="No I-compiler-nominated RFCs this time.")}}
 
-### Oldest PRs waiting for review
+## Oldest PRs waiting for review
 
 (TIP) Curate this list before the meeting
 

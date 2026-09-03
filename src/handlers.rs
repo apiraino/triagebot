@@ -64,6 +64,8 @@ pub struct Context {
     pub gh_comments: Arc<tokio::sync::RwLock<GitHubCommentsCache>>,
 }
 
+// TODO: what does this "handle" method do?
+// Seems lime a router to dispatch to `handle_issue!()` or `handle_command!()`
 #[expect(
     clippy::collapsible_if,
     reason = "we check the preconditions in the outer if, and handle errors inside"
@@ -75,9 +77,34 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
     }
     let mut errors = Vec::new();
 
+    log::debug!("[src/handlers::handle] >>> Event {:?}", &event);
+
     if let (Ok(config), Event::Issue(event)) = (config.as_ref(), event) {
+        log::debug!("[src/handlers::handle] >>> handling this to handle_issue");
         handle_issue(ctx, event, config, &mut errors).await;
     }
+
+    // Check if a new comment was created. Check the field `pr_review_state` for a pull request approval
+    let pr_approved = async {
+        if let (Ok(config), Event::IssueComment(event)) = (config.as_ref(), event) {
+            // maybe both checks are a bit redundant
+            if event.action == crate::github::IssueCommentAction::ReviewSubmitted
+                && let Some(review_state) = event.pr_review_state()
+                && *review_state == crate::github::PullRequestReviewState::Approved
+            {
+                log::debug!(
+                    "[src/handlers::handle] event.action is IssueCommentAction::ReviewSubmitted!",
+                );
+                notify_zulip::handle_pr_approved(ctx, event, config)
+                    .await
+                    .map_err(|e| HandlerError::Other(e.context("backport handler failed")))
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    };
 
     if let Some(body) = event.comment_body() {
         handle_command(ctx, event, &config, body, &mut errors).await;
@@ -188,6 +215,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
             .ok()
             .and_then(|c| c.review_submitted.as_ref())
         {
+            log::debug!("REVIEW SUBMITTED!");
             review_submitted::handle(
                 ctx,
                 event,
@@ -258,6 +286,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ) = futures::join!(
         prune_gh_comments,
         assign_comments,
@@ -273,6 +302,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved
     );
 
     for result in [
@@ -290,6 +320,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ] {
         if let Err(e) = result {
             errors.push(e);
@@ -358,7 +389,7 @@ macro_rules! issue_handlers {
 // Handle events that happened on issues
 //
 // This is for events that happen only on issues or pull requests (e.g. label changes or assignments).
-// Each module in the list must contain the functions `parse_input` and `handle_input`.
+// Each module in the list lives in `./src/handlers` and must contain the functions `parse_input` and `handle_input`.
 issue_handlers! {
     assign,
     autolabel,
@@ -392,12 +423,16 @@ macro_rules! command_handlers {
                 },
                 Event::Issue(e) => {
                     // no change in issue's body for these events, so skip
-                    log::debug!("skipping event, issue was {:?}", e.action);
+                    log::debug!("[handlers::command_handlers] skipping event, issue was {:?}", e.action);
                     return;
                 }
                 Event::IssueComment(e) => {
                     match e.action {
-                        IssueCommentAction::Created => {}
+                        IssueCommentAction::Created => {
+                            // This also happens when approving a PR (GH API returns that a "comment" was created)
+                            log::debug!("[handlers::command_handlers] IssueCommentAction::Created matches when a PR is approved");
+                            // let it go, do not return
+                        }
                         IssueCommentAction::Edited => {
                             if !event.has_comment_changed() {
                                 // We are not entirely sure why this happens.
@@ -414,6 +449,10 @@ macro_rules! command_handlers {
                             // don't execute commands again when comment is deleted, pinned or unpinned
                             log::debug!("skipping event, comment was {:?}", e.action);
                             return;
+                        },
+                        IssueCommentAction::ReviewSubmitted => {
+                            log::debug!("[handlers::command_handlers] IssueCommentAction::ReviewSubmitted SHOULD MATCH when a PR is approved");
+                            // don't return, let it go through
                         }
                     }
                 }
@@ -423,17 +462,24 @@ macro_rules! command_handlers {
                 }
             }
 
+            // TODO document what does this snippet do!
+            // extract from `IssueComment` events but also `Issue` events
             let input = Input::new(&body, vec![&ctx.username, "triagebot"]);
+            log::debug!("[command_handlers] input {:?}",input);
             let commands = if let Some(previous) = event.comment_from() {
+                log::debug!("[command_handlers] previous comment? command? {:?}",previous);
                 let prev_commands = Input::new(&previous, vec![&ctx.username, "triagebot"]).collect::<Vec<_>>();
                 input.filter(|cmd| !prev_commands.contains(cmd)).collect::<Vec<_>>()
             } else {
+                log::debug!("[command_handlers] input collect comment? command?");
                 input.collect()
             };
 
+            // When a PR is approved the comment body is empty or no command was recognized (see above), therefore commands is empty
             log::info!("Comment parsed to {commands:?}");
 
             if commands.is_empty() {
+                log::debug!("Returning because command was empty (or in the comment body no command was recognized)");
                 return;
             }
 

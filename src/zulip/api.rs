@@ -113,4 +113,11 @@ fn test_encode() {
         ".60abcdefghijklmnopqrstuvwxyz.7B.7C.7D~.7F",
     );
     check_encode("áé…", ".C3.A1.C3.A9.E2.80.A6");
+
+    // I am afraid the "==" should be added to the ALWAYS_SAFE chars
+    // See https://rust-lang.zulipchat.com/#narrow/channel/245100-t-compiler.2Fprioritization.2Falerts/topic/.E2.9C.94.20.23162452.20VecDeque.3A.20collecting.20an.20exhausted.20vec.3A.3AIntoIter.20y.E2.80.A6/with/622497516
+    check_encode(
+        "VecDeque: collecting an exhausted vec::IntoIter yields head == capacity, later failing wrap_index's debug assertion",
+        "https://rust-lang.zulipchat.com/#narrow/channel/245100-t-compiler.2Fprioritization.2Falerts/topic/.E2.9C.94.20.23162452.20VecDeque.3A.20collecting.20an.20exhausted.20vec.3A.3AIntoIter.20y.E2.80.A6/near/622445847",
+    );
 }
