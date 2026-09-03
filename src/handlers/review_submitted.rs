@@ -1,4 +1,5 @@
 use anyhow::Context as _;
+use tracing::info;
 
 use crate::config::ShortcutConfig;
 use crate::github::{Issue, IssueCommentAction, IssueCommentEvent, Label, PullRequestReviewState};
@@ -10,6 +11,7 @@ pub(crate) async fn handle(
     config: &ReviewSubmittedConfig,
     shortcut_config: Option<&ShortcutConfig>,
 ) -> anyhow::Result<()> {
+    info!("[handle::review_submitted] AAA handling event {:?}", event);
     if let Event::IssueComment(
         event @ IssueCommentEvent {
             action: IssueCommentAction::Created,
@@ -21,6 +23,10 @@ pub(crate) async fn handle(
         },
     ) = event
     {
+        info!("[handle::review_submitted] BBB handling event {:?}", event);
+        info!("[handle::review_submitted] CCC config {:?}", config);
+        // payload.pull_request.pull_request = Some(PullRequestDetails::new());
+
         if event.comment.pr_review_state != Some(PullRequestReviewState::ChangesRequested) {
             return Ok(());
         }

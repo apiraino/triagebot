@@ -18,6 +18,10 @@ use crate::github::GithubCommit;
 /// fields, this struct is used for both. The `pull_request` field can be used
 /// to determine which it is. Some fields are only available on pull requests
 /// (but not always, check the GitHub API for details).
+///
+/// <https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#get-an-issue
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads#issues>
+/// <https://docs.github.com/en/rest/issues?apiVersion=2022-11-28>
 #[derive(Debug, serde::Deserialize)]
 pub struct Issue {
     pub number: u64,
@@ -46,7 +50,27 @@ pub struct Issue {
     // (PR reviewers or issue assignees)
     // These are NOT the same as `IssueEvent.assignee`
     pub assignees: Vec<GitHubUser>,
+
+    /// Whether it is open or closed.
+    pub state: IssueState,
+    pub milestone: Option<Milestone>,
+
+    /// The API URL for discussion comments.
+    ///
+    /// Example: `https://api.github.com/repos/octocat/Hello-World/issues/1347/comments`
+    pub comments_url: String,
+    /// Number of comments
+    pub comments: Option<u32>,
+
+    /// The repository for this issue.
+    ///
+    /// Note that this is constructed via the [`Issue::repository`] method.
+    /// It is not deserialized from the GitHub API.
+    #[serde(skip)]
+    pub repository: OnceLock<IssueRepository>,
+
     /// Indicator if this is a pull request.
+    /// THE FOLLOWING FIELDS ARE RELEVANT ONLY TO PULL REQUESTS
     ///
     /// This is `Some` if this is a PR (as opposed to an issue). Note that
     /// this does not always get filled in by GitHub, and must be manually
@@ -56,8 +80,9 @@ pub struct Issue {
     #[serde(default)]
     pub draft: bool,
 
-    /// Number of comments
-    pub comments: Option<u32>,
+    // TODO: can I inject here a check to see if the PR has been approved?
+    // mergeable_state: clean,
+    pub approved: Option<bool>,
 
     /// Number of review comments
     ///
@@ -66,26 +91,12 @@ pub struct Issue {
     #[serde(default)]
     pub review_comments: Option<u32>,
 
-    /// The API URL for discussion comments.
-    ///
-    /// Example: `https://api.github.com/repos/octocat/Hello-World/issues/1347/comments`
-    pub comments_url: String,
-    /// The repository for this issue.
-    ///
-    /// Note that this is constructed via the [`Issue::repository`] method.
-    /// It is not deserialized from the GitHub API.
-    #[serde(skip)]
-    pub repository: OnceLock<IssueRepository>,
-
     /// The base commit for a PR (the branch of the destination repo).
     #[serde(default)]
     pub base: Option<CommitBase>,
     /// The head commit for a PR (the branch from the source repo).
     #[serde(default)]
     pub head: Option<CommitBase>,
-    /// Whether it is open or closed.
-    pub state: IssueState,
-    pub milestone: Option<Milestone>,
     /// Whether a PR has merge conflicts.
     pub mergeable: Option<bool>,
     /// The mergeable state (clean, blocked, unknown, ...)

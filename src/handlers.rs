@@ -1,7 +1,9 @@
 use crate::config::{self, Config, ConfigurationError};
 use crate::gh_comments::GitHubCommentsCache;
 use crate::gha_logs::GitHubActionLogsCache;
-use crate::github::{Event, GithubClient, IssueCommentAction, IssuesAction, IssuesEvent};
+use crate::github::{
+    Event, GithubClient, IssueCommentAction, IssuesAction, IssuesEvent, PullRequestReviewEvent,
+};
 use crate::handlers::pr_tracking::RepositoryWorkqueueMap;
 use crate::team_data::TeamClient;
 use crate::zulip::client::ZulipClient;
@@ -62,6 +64,8 @@ pub struct Context {
     pub gh_comments: Arc<tokio::sync::RwLock<GitHubCommentsCache>>,
 }
 
+// TODO: what does this "handle" method do?
+// Seems lime a router to dispatch to `handle_issue!()` or `handle_command!()`
 #[expect(
     clippy::collapsible_if,
     reason = "we check the preconditions in the outer if, and handle errors inside"
@@ -73,11 +77,44 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
     }
     let mut errors = Vec::new();
 
+    log::debug!("[src/handlers::handle] >>> Event {:?}", &event);
+
     if let (Ok(config), Event::Issue(event)) = (config.as_ref(), event) {
+        log::debug!("[src/handlers::handle] >>> handling this to handle_issue");
         handle_issue(ctx, event, config, &mut errors).await;
     }
 
+    // TODO: add proper handling for pull requests (instead of coercing them into issues)
+    // (See `event.rs`)
+    // if let (Ok(_config), Event::PullRequest(event)) = (config.as_ref(), event) {
+    //     log::debug!(
+    //         "[src/handlers::handle] >>> This is supposed to be a pull request, right? {:?}",
+    //         &event
+    //     );
+    // }
+
+    // The PR approval is nothing but a normal comment, `comment_body()` matches `Event::IssueComment` and can be empty
+    // Check `pr_review_state` for the marker for pull request approval
+    let pr_approved = async {
+        if let (Ok(config), Event::IssueComment(event)) = (config.as_ref(), event) {
+            log::debug!("[src/handlers::handle] Let's find out if this is PR approved");
+            if let Some(review_state) = event.pr_review_state() {
+                log::debug!("Yes it is? {:?}", review_state);
+                // or maybe something like this
+                backport::handle_pr_approved(ctx, event, config)
+                    .await
+                    .map_err(|e| HandlerError::Other(e.context("backport handler failed")))
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    };
+
+    log::debug!("[src/handlers::handle] >>> checking comment body for handle_command");
     if let Some(body) = event.comment_body() {
+        log::debug!("Can I try handling the PR approved event in a command?");
         handle_command(ctx, event, &config, body, &mut errors).await;
     }
 
@@ -186,6 +223,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
             .ok()
             .and_then(|c| c.review_submitted.as_ref())
         {
+            log::debug!("REVIEW SUBMITTED!");
             review_submitted::handle(
                 ctx,
                 event,
@@ -256,6 +294,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ) = futures::join!(
         prune_gh_comments,
         assign_comments,
@@ -271,6 +310,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved
     );
 
     for result in [
@@ -288,6 +328,7 @@ pub async fn handle(ctx: &Context, host: &str, event: &Event) -> Vec<HandlerErro
         review_changes_since,
         github_releases,
         merge_conflicts,
+        pr_approved,
     ] {
         if let Err(e) = result {
             errors.push(e);
@@ -356,7 +397,7 @@ macro_rules! issue_handlers {
 // Handle events that happened on issues
 //
 // This is for events that happen only on issues or pull requests (e.g. label changes or assignments).
-// Each module in the list must contain the functions `parse_input` and `handle_input`.
+// Each module in the list lives in `./src/handlers` and must contain the functions `parse_input` and `handle_input`.
 issue_handlers! {
     assign,
     autolabel,
@@ -395,7 +436,10 @@ macro_rules! command_handlers {
                 }
                 Event::IssueComment(e) => {
                     match e.action {
-                        IssueCommentAction::Created => {}
+                        IssueCommentAction::Created => {
+                            // This also happens when approving a PR (GH APi returns that a "comment" was created)
+                            log::debug!("[handlers::command_handlers] IssueCommentAction::Created matches when a PR is approved");
+                        }
                         IssueCommentAction::Edited => {
                             if !event.has_comment_changed() {
                                 // We are not entirely sure why this happens.
@@ -419,19 +463,43 @@ macro_rules! command_handlers {
                     log::debug!("skipping unsupported event");
                     return;
                 }
+                // TODO: add proper handling for pull requests (instead of coercing them into issues)
+                // see event.rs
+                // Event::PullRequest(_pull_request_review_event) => {
+                //     log::debug!("skipping event, it's a PR");
+                //     return;
+                // }
             }
 
+            // Is pr_review_state Approved?
+            log::debug!("[command_handlers] Trying to figure if the pr_review_state is Approved");
+            if let Some(review_state) = event.pr_review_state() {
+                log::debug!(
+                    "[command_handlers] PR review state is '{:?}'. Now I should handle that. But how?", review_state
+                );
+                // XXX: I don't think it's possible
+                // backport::handle_pr_approved(ctx, config, event).await;
+                // handle_issue(ctx, event, config, &mut errors).await;
+            }
+
+            // TODO document what does this snippet do!
+            // extract from `IssueComment` events but also `Issue` events
             let input = Input::new(&body, vec![&ctx.username, "triagebot"]);
+            log::debug!("[command_handlers] input {:?}",input);
             let commands = if let Some(previous) = event.comment_from() {
+                log::debug!("[command_handlers] previous comment? command? {:?}",previous);
                 let prev_commands = Input::new(&previous, vec![&ctx.username, "triagebot"]).collect::<Vec<_>>();
                 input.filter(|cmd| !prev_commands.contains(cmd)).collect::<Vec<_>>()
             } else {
+                log::debug!("[command_handlers] input collect comment? command?");
                 input.collect()
             };
 
+            // When a PR is approved the comment body is empty or no command was recognized (see above), therefore commands is empty
             log::info!("Comment parsed to {commands:?}");
 
             if commands.is_empty() {
+                log::debug!("Returning because command was empty (or in the comment body no command was recognized)");
                 return;
             }
 
@@ -520,6 +588,7 @@ command_handlers! {
     concern: Concern,
     transfer: Transfer,
     merge: Merge,
+    // pr_approved: ApprovePr,
 }
 
 #[derive(Debug)]
