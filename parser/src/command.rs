@@ -3,6 +3,7 @@ use crate::ignore_block::IgnoreBlocks;
 use crate::token::Tokenizer;
 use regex::Regex;
 
+pub mod approve;
 pub mod assign;
 pub mod close;
 pub mod concern;
@@ -17,6 +18,8 @@ pub mod second;
 pub mod shortcut;
 pub mod transfer;
 
+// Commands handlers in ./src/handlers/*
+// Command name must match filename
 #[derive(Debug, PartialEq)]
 pub enum Command<'a> {
     Relabel(Result<relabel::RelabelCommand, Error<'a>>),
