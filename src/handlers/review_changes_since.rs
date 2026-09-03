@@ -1,3 +1,9 @@
+///! This handler automatically adds a link to the diff when a review is submitted
+///!
+///! Fetches the latest state of the commit and does a git diff (if the base stayed the same) or git-range-diff (if the base changed) to show "what changed since that review"
+///!
+///! The link is added to the original review comment.
+///!
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context as _;
