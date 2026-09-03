@@ -1,7 +1,9 @@
 //! Handles stable, beta backports for PRs fixing P-high/critical regressions
 //!
-//! Add proper labels, opens a poll on Zulip to gauge interest about a backport.
-//! Posts a closing messages on Zulip when the PR has been backport accepted.
+//! - parse_input / handle_input: handle work when a pull request is backport approved
+//! - handle_pr_approved: handles work when a pull request is approved
+//!
+//! Figures out if the pull request is solving a P-high/P-critical regression and - if yes - adds backport nomination labels.
 //!
 //! Configuration is done with the `[backport]` table.
 //!
@@ -9,13 +11,13 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::config::BackportConfig;
-use crate::github::{IssuesAction, IssuesEvent, Label};
+use crate::config::{BackportConfig, Config};
+use crate::github::{IssueCommentEvent, IssuesAction, IssuesEvent, Label};
 use crate::handlers::Context;
 use anyhow::Context as AnyhowContext;
 use futures::future::join_all;
 use regex::Regex;
-use tracing as log;
+use tracing::{self as log};
 
 // See https://docs.github.com/en/issues/tracking-your-work-with-issues/creating-issues/linking-a-pull-request-to-an-issue
 // See tests to see what matches
@@ -50,10 +52,22 @@ pub(super) async fn parse_input(
         return Ok(None);
     };
 
+    dbg!("ACTION", &event.action);
+    dbg!("ISSUE", &event.issue);
+
     // Only handle the event when the PR:
-    // - is opened (and not a draft)
-    // - is converted from draft to ready for review
-    // - when the first comment is edited
+    // - NOPE is opened (and not a draft)
+    // - NOPE is converted from draft to ready for review
+    // - NOPE when the first comment is edited
+    //
+    // - is a pull request
+    // - has just been approved (from `IssuesEvent:ReviewRequested` -> `PullRequestReviewEvent:Submitted`)
+    // - is not a draft
+    // - closes a regression defined in REGRESSION_LABELS
+    // - closes a regression with priority defined in PRIORITY_LABELS
+
+    // TODO: if a pull request is approved, don't do anything
+    dbg!(&event.action);
     let skip_check = !matches!(
         event.action,
         IssuesAction::Opened | IssuesAction::Edited | IssuesAction::ReadyForReview
@@ -71,6 +85,7 @@ pub(super) async fn parse_input(
 
     let pr_labels: Vec<&str> = pr.labels.iter().map(|l| l.name.as_str()).collect();
 
+    // Don't add a `-nominated` if the PR has a `-accepted` (in case, revert this action)
     if let IssuesAction::Labeled { label } = &event.action {
         if (label.name == "beta-nominated" && contains_any(&pr_labels, &["beta-accepted"]))
             || (label.name == "stable-nominated" && contains_any(&pr_labels, &["stable-accepted"]))

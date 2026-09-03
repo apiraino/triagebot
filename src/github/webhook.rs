@@ -19,6 +19,8 @@ use crate::interactions::ErrorComment;
 use event::*;
 
 /// The name of a webhook event.
+///
+/// <https://docs.github.com/en/webhooks/webhook-events-and-payloads>
 #[derive(Debug)]
 enum EventName {
     /// Pull request activity.
@@ -184,6 +186,7 @@ pub async fn webhook(
     }
 }
 
+// 1) lands here
 async fn process_payload(
     event: EventName,
     payload: &str,
@@ -195,11 +198,16 @@ async fn process_payload(
             let mut payload = deserialize_payload::<PullRequestReviewEvent>(payload)
                 .context("failed to deserialize to PullRequestReviewEvent")?;
 
-            log::info!("handling pull request review comment {payload:?}");
+            // THIS IS INVOKED
+            log::info!(
+                "[process_payload::EventName::PullRequestReview] !!! handling pull request review {payload:?}"
+            );
+
             payload.pull_request.pull_request = Some(PullRequestDetails::new());
 
             // Treat pull request review comments exactly like pull request
             // comments.
+            // XXX: returns `IssueCommentAction::Created`
             Event::IssueComment(IssueCommentEvent {
                 action: match payload.action {
                     PullRequestReviewAction::Submitted => IssueCommentAction::Created,
@@ -218,7 +226,10 @@ async fn process_payload(
 
             payload.issue.pull_request = Some(PullRequestDetails::new());
 
-            log::info!("handling pull request review comment {payload:?}");
+            // THIS IS **NOT** INVOKED
+            log::info!(
+                "[process_payload::EventName::PullRequestRevieComment] handling pull request review comment {payload:?}"
+            );
 
             // Treat pull request review comments exactly like pull request
             // review comments.

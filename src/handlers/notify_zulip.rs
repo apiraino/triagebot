@@ -3,18 +3,21 @@
 //! Configured in [notify-zulip.*] sections
 //!
 
-use crate::github::GitHubUser;
+use crate::config::Config;
+use crate::github::{GitHubUser, Issue, IssueCommentEvent};
 use crate::zulip::api::Recipient;
 use crate::zulip::{PingMode, format_zulip_username};
 use crate::{
     config::{NotifyZulipConfig, NotifyZulipLabelConfig, NotifyZulipTablesConfig},
-    github::{Issue, IssuesAction, IssuesEvent, Label},
+    github::{IssuesAction, IssuesEvent, Label},
     handlers::Context,
 };
 use futures::future::join_all;
 use tracing as log;
 
+/// TODO: what is this?
 pub(super) struct NotifyZulipInput {
+    /// Type of the Zulip notification. Remaps the corresponding GitHub IssueAction.
     notification_type: NotificationType,
     /// Label that triggered this notification.
     ///
@@ -26,6 +29,7 @@ pub(super) struct NotifyZulipInput {
     include_config_names: Vec<String>,
 }
 
+#[derive(Debug)]
 pub(super) enum NotificationType {
     Open,
     Labeled,
@@ -44,6 +48,7 @@ pub(super) async fn parse_input(
     };
 
     match &event.action {
+        // TODO: if the event is about a label
         IssuesAction::Labeled { label } | IssuesAction::Unlabeled { label: Some(label) } => {
             let applied_label = label.clone();
             Ok(config
@@ -54,6 +59,7 @@ pub(super) async fn parse_input(
                 })
                 .map(|input| vec![input]))
         }
+        // TODO: if the event is about an issue
         IssuesAction::Opened | IssuesAction::Closed | IssuesAction::Reopened => {
             Ok(Some(parse_open_close_reopen_input(event, config)))
         }
@@ -190,13 +196,22 @@ pub(super) async fn handle_input(
 ) -> anyhow::Result<()> {
     for input in inputs {
         let tables_config = &config.labels[&input.label.name];
+        log::debug!(
+            "[handle_input] Iterating input type={:?} label={}, include_config_names={:?}, tables_config={:?}",
+            input.notification_type,
+            input.label.name,
+            input.include_config_names,
+            tables_config
+        );
 
         // Get valid label configs
         let mut label_configs: Vec<&NotifyZulipLabelConfig> = vec![];
         for name in input.include_config_names {
+            // TODO: figure out what is supposed in "name"
             label_configs.push(&tables_config.subtables[&name]);
         }
 
+        log::debug!("[handle_input] label configs {:?}", label_configs);
         for label_config in label_configs {
             let config = label_config;
 
@@ -233,6 +248,8 @@ pub(super) async fn handle_input(
             let recipients = &mut event.issue.assignees.clone();
             recipients.push(event.issue.user.clone());
 
+            // TODO: When going through this when a PR is approved
+            // `msgs_send` can stay to zero because we don't send messages to GitHub
             let mut msgs_send = 0;
 
             for msg in msgs {
@@ -241,6 +258,7 @@ pub(super) async fn handle_input(
                 let msg = replace_team_to_be_nominated(&event.issue.labels, msg);
                 let msg = msg.replace("{recipients}", &get_zulip_ids(ctx, recipients).await);
 
+                log::debug!("[handle_input] sending msg to Zulip {}", msg);
                 let req = crate::zulip::MessageApiRequest {
                     recipient,
                     content: &msg,
@@ -269,6 +287,157 @@ pub(super) async fn handle_input(
     }
 
     Ok(())
+}
+
+/// Send a message on Zulip when a pull request fixing a P-high/P-critical regression is approved (see `handlers.rs`)
+/// This is just a wrapper around handle_input() to remap a `IssueCommentEvent` into `IssueEvent`
+pub(crate) async fn handle_pr_approved(
+    ctx: &Context,
+    event: &IssueCommentEvent,
+    _config: &Config,
+) -> anyhow::Result<()> {
+    log::debug!(
+        "[notify_zulip::handle_pr_approved] event {:?}",
+        &event.action
+    );
+    // log::info!(
+    //     "[notify_zulip::handle_pr_approved] handling config {:?}",
+    //     config
+    // );
+    log::info!(
+        "[notify_zulip::handle_pr_approved] handling event {:?}",
+        event
+    );
+
+    // Zulip message configuration (from triagebot.toml: `[notify-zulip."beta-nominated".compiler]`)
+    let mut z_labels_cfg = std::collections::HashMap::new();
+    let notif_zulip_label_cfg = NotifyZulipLabelConfig {
+        zulip_stream: 554919, // 474880, // #t-compiler/backports
+        topic: "#{number}: beta-nominated".to_string(),
+        messages_on_add: vec![
+            "PR #{number} \"{title}\" fixes a regression and has been nominated for backport.
+{recipients}, what do you think about it?
+This topic will help T-compiler getting context about it.
+
+Tip: to approve or decline from this Zulip thread, use:
+@_**triagebot** backport approve
+@_**triagebot** backport decline
+"
+            .to_string(),
+            "/poll Should #{number} be beta backported?
+approve
+decline
+don't know
+"
+            .to_string(),
+        ],
+        messages_on_remove: vec!["PR #{number}'s beta-nomination has been removed.".to_string()],
+        github_comment: None,
+        messages_on_close: vec![],
+        messages_on_reopen: vec![],
+        required_labels: vec!["T-compiler".to_string()],
+    };
+    z_labels_cfg.insert("T-compiler".to_string(), notif_zulip_label_cfg);
+
+    let mut z_labels = std::collections::HashMap::new();
+    let notif_zulip_tables_cfg = NotifyZulipTablesConfig {
+        subtables: z_labels_cfg,
+    };
+    z_labels.insert("T-compiler".to_string(), notif_zulip_tables_cfg);
+    let z_config = NotifyZulipConfig { labels: z_labels };
+
+    // Only these are used:
+    // event.issue.number
+    // event.issue.title
+    // event.issue.assignees
+    // event.issue.user
+    // event.issue.labels
+    let z_issue = Issue {
+        number: event.issue.number,
+        body: "UNUSED".to_string(),
+        created_at: event.issue.created_at,
+        updated_at: event.issue.updated_at,
+        merged_at: None,
+        merge_commit_sha: None,
+        title: event.issue.title.clone(),
+        html_url: "UNUSED".to_string(),
+        user: crate::github::repos::GitHubUser {
+            id: event.issue.user.id,
+            login: event.issue.user.login.clone(),
+            r#type: crate::github::repos::GitHubUserType::Bot,
+        }, // UNUSED
+        labels: vec![], // UNUSED
+        assignees: event.issue.assignees.clone(),
+        state: crate::github::issue::IssueState::Open, // UNUSED
+        milestone: None,
+        comments_url: "UNUSED".to_string(),
+        comments: None,
+        repository: std::sync::OnceLock::new(), // UNUSED
+        pull_request: None,
+        draft: false,
+        // approved: Some(true),
+        review_comments: None,
+        base: None,
+        head: None,
+        mergeable: None,
+        mergeable_state: None,
+        author_association: octocrab::models::AuthorAssociation::None.into(),
+    };
+
+    let z_event = IssuesEvent {
+        action: IssuesAction::None,
+        after: None,
+        before: None,
+        changes: None,
+        issue: z_issue,
+        // UNUSED
+        repository: crate::github::Repository {
+            full_name: "rust-lang/foo".to_string(),
+            default_branch: "main".to_string(),
+            fork: false,
+            parent: None,
+        },
+        // UNUSED
+        sender: crate::github::repos::GitHubUser {
+            id: 42,
+            login: "UNUSED".to_string(),
+            r#type: crate::github::repos::GitHubUserType::Bot,
+        },
+    };
+
+    // TODO
+    // pub(super) struct NotifyZulipInput {
+    //     notification_type: NotificationType,
+    //     /// Label that triggered this notification.
+    //     ///
+    //     /// For example, if an `I-prioritize` issue is closed,
+    //     /// this field will be `I-prioritize`.
+    //     label: Label,
+    //     /// List of strings for tables such as [notify-zulip."beta-nominated"]
+    //     /// and/or [notify-zulip."beta-nominated".compiler]
+    //     include_config_names: Vec<String>,
+    // }
+    // pub(super) enum NotificationType {
+    //     Open,
+    //     Labeled,
+    //     Unlabeled,
+    //     Closed,
+    //     Reopened,
+    // }
+
+    // let inputs = vec![NotifyZulipInput {
+    //     notification_type: NotificationType::Labeled,
+    //     label: Label {
+    //         name: "T-compiler".to_string(),
+    //     },
+    //     include_config_names: vec!["T-compiler".to_string()],
+    // }];
+    let inputs = parse_input(ctx, &z_event, Some(&z_config))
+        .await
+        .unwrap()
+        .unwrap();
+
+    handle_input(ctx, &z_config, &z_event, inputs).await
 }
 
 async fn get_zulip_ids(ctx: &Context, recipients: &[GitHubUser]) -> String {
