@@ -186,6 +186,10 @@ pub(crate) enum PathMatcherError {
     NonRelativePath,
 }
 
+pub fn contains_any(haystack: &[&str], needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

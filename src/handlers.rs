@@ -363,12 +363,13 @@ issue_handlers! {
     assign,
     autolabel,
     backport,
+    close,
     issue_links,
     major_change,
     mentions,
     notify_zulip,
-    review_requested,
     pr_tracking,
+    review_requested,
 }
 
 macro_rules! command_handlers {
@@ -383,6 +384,9 @@ macro_rules! command_handlers {
             match event {
                 // always handle new PRs / issues
                 Event::Issue(IssuesEvent { action: IssuesAction::Opened, .. }) => {},
+                Event::Issue(IssuesEvent { action: IssuesAction::Closed, .. }) => {
+                    log::debug!("[command_handlers] Catch issue closing");
+                },
                 Event::Issue(IssuesEvent { action: IssuesAction::Edited, .. }) => {
                     // If the comment didn't change, let's avoid processing the same commands twice.
                     if !event.has_comment_changed() {
